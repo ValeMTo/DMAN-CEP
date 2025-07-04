@@ -82,6 +82,14 @@ class ConfigParserClass:
         self.logger.debug("Cost transmission line set in config parser")
         return self.config['outline']['cost_transmission_line']
     
+    def get_missing_computation(self):
+        """
+        Returns whether the missing computation is enabled for the model.
+        :return: bool
+        """
+        self.logger.debug("Missing computation set in config parser")
+        return self.config['outline']['missing_computation']
+    
     
     def get_timeout_time_steps(self):
         """

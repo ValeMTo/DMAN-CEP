@@ -1078,23 +1078,35 @@ class XMLGeneratorClass:
             parameters=f"{' '.join(flow_variables)} {delta}"
         )
         
-    def add_utility_function_constaint(self, extra_name, variable, import_marginal_cost, export_marginal_cost, cost):
-        if not isinstance(import_marginal_cost, int) or not isinstance(export_marginal_cost, int) or not isinstance(cost, int):
-            raise ValueError("import_marginal_cost, export_marginal_cost and cost must be integers")
+    def add_utility_function_constaint(self, extra_name, variables, import_marginal_costs, export_marginal_costs, cost):
+        def build_recursive(variables):
+            if len(variables) == 1:
+                return variables[0]
+            return add(variables[0], build_recursive(variables[1:]))
+        
+        benefits = []
+        for i in range(len(variables)):
+            benefits.append(export_marginal_costs[i] + cost - import_marginal_costs[i])
 
-        if not self.find_predicate(f"maximise_utilityFunction"):
+        if not self.find_predicate(f"maximise_utilityFunction_{len(variables)}"):
             self.add_function(
-                name=f"maximise_utilityFunction", 
-                parameters="int transmission_line int import_marginal_cost int export_marginal_cost int cost",
-                functional=sub(mul("transmission_line", sub("import_marginal_cost", "export_marginal_cost")), "cost")
+                name=f"maximise_utilityFunction_{len(variables)}", 
+                parameters=" ".join([f"int {var}" for var in variables]) + " " + " ".join([f"int benefit_{i}" for i in range(len(variables))]) + " int cost",
+                functional=build_recursive([
+                    conditional(
+                        boolean_lt(var, "0"),
+                        "0",
+                        mul(var, f"benefit_{i}")
+                    ) for i, var in enumerate(variables)
+                ])
             )
 
         self.add_constraint(
-            name=f"utilityFunction_{extra_name}",
-            arity=1,
-            scope=f"{variable}",
-            reference=f"maximise_utilityFunction",
-            parameters=f"{variable} {import_marginal_cost} {export_marginal_cost} {cost}"
+            name=f"utilityFunction_{len(variables)}_{extra_name}",
+            arity=len(variables),
+            scope=f"{' '.join(variables)}",
+            reference=f"maximise_utilityFunction_{len(variables)}",
+            parameters=f"{' '.join(variables)} {' '.join([str(b) for b in benefits])} {cost}"
         )
 
     def print_xml(self, output_file = "defaultName_problem.xml"):

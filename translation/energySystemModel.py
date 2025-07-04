@@ -81,27 +81,29 @@ class EnergyModelClass:
             self.data[year][t] = {}
             self.build_demand_map(year, t)
             marginal_costs_df = self.solve_internal_DCOP(t, year)
-            for k in tqdm(range(self.max_iteration), desc=f"Solving time {t} for year {year}"):
+            for k in tqdm(range(self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
                 if self.check_convergence(marginal_costs_df):
-                    self.logger.info(f"Convergence reached for time {t} and year {year}")
+                    self.logger.info(f"Convergence reached for time {t} and year {year} after {k} iterations")
+                    self.solve_transmission_problem(t, year)
                     break
                 self.solve_transmission_problem(t, year)
                 marginal_costs_df = self.solve_internal_DCOP(t, year)
-        if k == self.max_iteration:
-            self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
+            if k == self.max_iteration:
+                self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
+            marginal_costs_df = None
 
     def solve_internal_DCOP(self, t, year):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
 
         for country in self.countries:
             self.create_internal_DCOP(country, t, year)
-        output_folder_path = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal"))
-        marginal_costs_df = self.calculate_marginal_costs(t, year, output_folder_path)
+        countries_check, output_folder_path = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal"))
+        marginal_costs_df = self.calculate_marginal_costs(t, year, output_folder_path, countries_check)
 
         self.logger.info(f"Marginal costs calculated for time {t} and year {year}")
         return marginal_costs_df
     
-    def calculate_marginal_costs(self, t, year, output_folder_path):
+    def calculate_marginal_costs(self, t, year, output_folder_path, countries_check):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year} at {output_folder_path}")
         data = {
             country: {
@@ -121,7 +123,23 @@ class EnergyModelClass:
                 tree = ET.parse(file_path)
                 root = tree.getroot()
                 valuation = root.attrib.get("valuation")
+                if valuation is None or not str(valuation).isdigit():
+                    demand_type = file_name.split("_")[1][0]
+                    fallback_order = {
+                        '-': ['0', '+'],
+                        '+': ['0', '-'],
+                        '0': ['+', '-']
+                    }.get(demand_type, ['0', '+', '-'])  # default fallback order
 
+                    for fallback in fallback_order:
+                        if countries_check[country].get(fallback) != -1:
+                            valuation = countries_check[country][fallback]
+                            self.logger.debug(f"Using fallback valuation {valuation} for country {country} and demand {demand}")
+                            break
+                    if valuation is None or not isinstance(valuation, int):
+                        self.logger.error(f"File {file_name} has an invalid 'valuation' parameter: {valuation}")
+                        raise ValueError(f"File {file_name} has an invalid 'valuation' parameter: {valuation}")
+                
                 costs = 0
                 for assignment in root.findall("assignment"):
                     var = assignment.attrib["variable"]
@@ -134,12 +152,12 @@ class EnergyModelClass:
                     elif attr == "rateActivity":
                         costs += value * self.data[year][t][tech]['variable_cost']
 
-
                 self.logger.debug(f"Processing file {file_name} with valuation {valuation}")
                 df.at[country, demand] = costs
                 df.at[country, "marginal_demand"] = self.demand_map[t][country]['marginal_demand']
         df['MC_import'] = (df["0"] - df[f"-{self.delta_marginal_cost}"]) / (df['marginal_demand'])
         df['MC_export'] = (df[f"+{self.delta_marginal_cost}"] - df["0"]) / (df['marginal_demand'])
+        df[['MC_import', 'MC_export']] = df[['MC_import', 'MC_export']].clip(lower=0)
         return df
 
     def solve_transmission_problem(self, time, year):
@@ -150,19 +168,19 @@ class EnergyModelClass:
             data=self.transmission_data,
             delta_demand_map=self.demand_map[time],
             year_split=self.demand_map[time]['year_split'],
-            marginal_costs_df=self.marginal_costs_df,
+            marginal_costs_df=self.marginal_costs_df[['MC_import', 'MC_export']],
             cost_transmission_line=self.config_parser.get_cost_transmission_line(),
             logger=self.logger,
             xml_file_path=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission/problems"),
             expansion_enabled=self.config_parser.get_expansion_enabled(),
         )
 
-        transmission_solver.generate_xml(domains=self.create_domains(country=None, time=None, problem_type='transmission'))
+        transmission_solver.generate_xml()
         transmission_solver.print_xml(
             name=f"transmission_problem_{time}.xml",
         )
 
-        output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
+        _, output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
         self.update_demand(time, output_folder)
         self.logger.debug(f"Transmission problem solved for time {time}")
 
@@ -174,6 +192,7 @@ class EnergyModelClass:
         distance = (self.marginal_costs_df[['MC_import', 'MC_export']] - marginal_costs_df[['MC_import', 'MC_export']]).abs().max().max() 
         self.logger.debug(f"Maximum Distance between marginal costs: {distance}")
         if distance < self.marginal_cost_tolerance:
+            self.logger.info(f"Convergence reached with distance {distance} < tolerance {self.marginal_cost_tolerance}")
             return True
         self.marginal_costs_df = marginal_costs_df
         return False
@@ -290,6 +309,7 @@ class EnergyModelClass:
         java_command = [
             'java', 
             '-Xmx1G', 
+            '-ea',
             '-cp', 
             'frodo2.18.1.jar:junit-4.13.2.jar:hamcrest-core-1.3.jar', 
             'frodo2.algorithms.AgentFactory', 
@@ -336,23 +356,36 @@ class EnergyModelClass:
                 future.result()  # Wait for each thread to complete
 
         # Check that each output file in the folder contains a "valuation" parameter, so the run was successful
+        if 'transmission' not in folder:
+            countries_check = dict.fromkeys(self.countries, dict.fromkeys(['-', '+', '0'], -1)) 
+        else:
+            countries_check = {}
+
         for file_name in os.listdir(output_folder):
             if file_name.endswith("_output.xml"):
                 file_path = os.path.join(output_folder, file_name)
                 try:
                     tree = ET.parse(file_path)
                     root = tree.getroot()
-                    if "valuation" not in root.attrib:
-                        self.logger.error(f"File {file_name} is missing the 'valuation' parameter.")
-                        raise ValueError(f"File {file_name} is missing the 'valuation' parameter.")
-                    if not root.attrib["valuation"].isdigit():
-                        self.logger.error(f"File {file_name} has an invalid 'valuation' parameter: {root.attrib['valuation']}")
-                        raise ValueError(f"File {file_name} as infinity as 'valuation' parameter: {root.attrib['valuation']}")
+                    if "valuation" not in root.attrib and 'transmission' not in folder:
+                        self.logger.warning(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
+                        countries_check[file_name.split('_')[0]][file_name.split('_')[1][0]] = 0
+                    elif "valuation" in root.attrib and 'transmission' not in folder:
+                        countries_check[file_name.split('_')[0]][file_name.split('_')[1][0]] = int(root.attrib["valuation"])
+                    elif "valuation" not in root.attrib and 'transmission' in folder:
+                        self.logger.error(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
+                        raise ValueError(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
+                    else:
+                        try:
+                            int(root.attrib["valuation"])
+                        except (ValueError, TypeError):
+                            self.logger.error(f"File {file_name} has an invalid 'valuation' parameter: {root.attrib['valuation']}")
+                            raise ValueError(f"File {file_name} has an invalid 'valuation' parameter: {root.attrib['valuation']}")
                 except ET.ParseError as e:
                     self.logger.error(f"Error parsing XML file {file_name}: {e}")
                     raise ValueError(f"Error parsing XML file {file_name}: {e}")
 
-        return output_folder
+        return countries_check, output_folder
     
     def create_domains(self, country, time, problem_type='internal'):
         self.logger.debug(f"Creating domains for {problem_type} problem in the model")
@@ -371,8 +404,8 @@ class EnergyModelClass:
                 ),
                 'rateActivity_domain': range(
                     0,
-                    round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']/100),
-                    round(self.demand_map[time][country]['demand']/100)
+                    round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']*0.10),
+                    round(self.demand_map[time][country]['demand']/200)
                 )
             }
             return domains_mapping
@@ -381,7 +414,7 @@ class EnergyModelClass:
                 'capacity_domain': range(
                     domains['transmission']['min'],
                     domains['transmission']['max'] + 1,
-                    domains['transmission']['step']
+                    domains['transmission']['step'], 
                 )
             }
             return domains_mapping

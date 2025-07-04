@@ -27,6 +27,7 @@ class EnergyAgentClass:
         
         self.tech_df = self.data
         total_technologies = len(self.tech_df)
+        self.tech_df['AVAILABILITY_FACTOR'] = self.tech_df['AVAILABILITY_FACTOR'].fillna(0.9)  # Default to 1 if NaN
         self.tech_df['FACTOR'] = self.tech_df['CAPACITY_FACTOR'] * self.tech_df['AVAILABILITY_FACTOR'] * self.tech_df['CAPACITY_TO_ACTIVITY_UNIT'] * self.year_split
         self.tech_df['FACTOR'] = self.tech_df['FACTOR'].fillna(0)  # Replace NaN factors with zero
         self.tech_df = self.tech_df[self.tech_df['FACTOR'] > 0]
@@ -35,7 +36,7 @@ class EnergyAgentClass:
             self.tech_df['VARIABLE_COST'].notna() &
             self.tech_df['FIXED_COST'].notna()
         ]
-        self.tech_df = self.tech_df[-1:]
+        
         #self.tech_df['VARIABLE_COST'] = self.tech_df['VARIABLE_COST'].apply(lambda x: min(x, 999) if pd.notna(x) else x)
 
         if total_technologies < len(self.tech_df):
@@ -57,9 +58,9 @@ class EnergyAgentClass:
                 variable_capacity_name=f"{technology}_capacity",
                 rateActivity_variable=f"{technology}_rateActivity",
                 previous_installed_capacity=round(row['MIN_INSTALLED_CAPACITY']) if pd.notna(row['MIN_INSTALLED_CAPACITY']) else 0,
-                capital_cost=round((row['CAPITAL_COST']/row['OPERATIONAL_LIFETIME'])/10**6), # convert to million currency units
+                capital_cost=round((row['CAPITAL_COST']/row['OPERATIONAL_LIFETIME'])/10**3), # convert to thousand currency units
                 variable_cost=round(row['VARIABLE_COST']),
-                fixed_cost=round((row['FIXED_COST'] * self.year_split) / 10**3)  # convert to thousand currency units,
+                fixed_cost=round((row['FIXED_COST'] * self.year_split))  
             )
             self.xml_generator.add_maximum_activity_rate_constraint(
                 cap_variable=f"{technology}_capacity",

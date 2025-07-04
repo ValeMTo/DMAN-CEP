@@ -237,6 +237,7 @@ class osemosysDataParserClass(dataParserClass):
 
         new_df = capital_costs_df[['COUNTRY', 'TECHNOLOGY', year]].rename(columns={year: 'CAPITAL_COST'})
         new_df['CAPITAL_COST'] = pd.to_numeric(new_df['CAPITAL_COST'], errors='coerce')
+        new_df['CAPITAL_COST'] = new_df['CAPITAL_COST']/1000 # The cost in the Excel is for GW not MW of capacity
 
         new_df['CAPITAL_COST'] = self.convert_fromMdollars_cost_unit(new_df['CAPITAL_COST'], unit)
 
@@ -249,6 +250,7 @@ class osemosysDataParserClass(dataParserClass):
 
         new_df = fixed_costs_df[['COUNTRY', 'TECHNOLOGY', year]].rename(columns={year: 'FIXED_COST'})
         new_df['FIXED_COST'] = pd.to_numeric(new_df['FIXED_COST'], errors='coerce')
+        new_df['FIXED_COST'] = new_df['FIXED_COST']/1000 # The cost in the Excel is for GW not MW of capacity
 
         new_df['FIXED_COST'] = self.convert_fromMdollars_cost_unit(new_df['FIXED_COST'], unit)
 
@@ -261,6 +263,7 @@ class osemosysDataParserClass(dataParserClass):
 
         new_df = variable_costs_df[['COUNTRY', 'TECHNOLOGY','MODEOFOPERATION', year]].rename(columns={year: 'VARIABLE_COST', 'MODEOFOPERATION': 'MODE_OF_OPERATION'})
         new_df['VARIABLE_COST'] = pd.to_numeric(new_df['VARIABLE_COST'], errors='coerce')
+        new_df['VARIABLE_COST'] = new_df['VARIABLE_COST']/1000 # The cost in the Excel is for GW not MW of capacity
 
         new_df['VARIABLE_COST'] = self.convert_fromMdollars_cost_unit(new_df['VARIABLE_COST'], unit)
 

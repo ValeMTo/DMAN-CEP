@@ -1,0 +1,96 @@
+<?xml version="1.0" ?>
+<instance xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="src/frodo2/algorithms/XCSPschemaJaCoP.xsd">
+	<presentation name="TransmissionModel" maxConstraintArity="2" maximize="False" format="XCSP 2.1_FRODO"/>
+	<agents>
+		<agent name="BW"/>
+		<agent name="ZM"/>
+		<agent name="ZW"/>
+	</agents>
+	<domains>
+		<domain name="capacity_domain" nbValues="107">-689 -676 -663 -650 -637 -624 -611 -598 -585 -572 -559 -546 -533 -520 -507 -494 -481 -468 -455 -442 -429 -416 -403 -390 -377 -364 -351 -338 -325 -312 -299 -286 -273 -260 -247 -234 -221 -208 -195 -182 -169 -156 -143 -130 -117 -104 -91 -78 -65 -52 -39 -26 -13 0 13 26 39 52 65 78 91 104 117 130 143 156 169 182 195 208 221 234 247 260 273 286 299 312 325 338 351 364 377 390 403 416 429 442 455 468 481 494 507 520 533 546 559 572 585 598 611 624 637 650 663 676 689</domain>
+	</domains>
+	<variables>
+		<variable name="transmission_BW_ZW" domain="capacity_domain" agent="BW"/>
+		<variable name="transmission_ZM_ZW" domain="capacity_domain" agent="ZM"/>
+		<variable name="transmission_ZW_BW" domain="capacity_domain" agent="ZW"/>
+		<variable name="transmission_ZW_ZM" domain="capacity_domain" agent="ZW"/>
+	</variables>
+	<predicates>
+		<predicate name="symmetry">
+			<parameters>int var1 int var2</parameters>
+			<expression>
+				<functional>eq(var1, neg(var2))</functional>
+			</expression>
+		</predicate>
+		<predicate name="powerBalance_1">
+			<parameters>int var_0 int delta</parameters>
+			<expression>
+				<functional>le(abs(var_0), delta)</functional>
+			</expression>
+		</predicate>
+		<predicate name="powerBalance_2">
+			<parameters>int var_0 int var_1 int delta</parameters>
+			<expression>
+				<functional>le(add(abs(var_0), abs(var_1)), delta)</functional>
+			</expression>
+		</predicate>
+		<predicate name="withinMaxCapacity">
+			<parameters>int capacity int max_capacity</parameters>
+			<expression>
+				<functional>le(capacity, max_capacity)</functional>
+			</expression>
+		</predicate>
+	</predicates>
+	<constraints>
+		<constraint name="symmetry_BW_ZW" arity="2" scope="transmission_BW_ZW transmission_ZW_BW" reference="symmetry">
+			<parameters>transmission_BW_ZW transmission_ZW_BW</parameters>
+		</constraint>
+		<constraint name="symmetry_ZM_ZW" arity="2" scope="transmission_ZM_ZW transmission_ZW_ZM" reference="symmetry">
+			<parameters>transmission_ZM_ZW transmission_ZW_ZM</parameters>
+		</constraint>
+		<constraint name="powerBalance_1_BW" arity="1" scope="transmission_BW_ZW" reference="powerBalance_1">
+			<parameters>transmission_BW_ZW 162</parameters>
+		</constraint>
+		<constraint name="utilityFunction_ZW_ZM" arity="1" scope="transmission_BW_ZW" reference="maximise_utilityFunction_1">
+			<parameters>transmission_BW_ZW 0 0</parameters>
+		</constraint>
+		<constraint name="powerBalance_1_ZM" arity="1" scope="transmission_ZM_ZW" reference="powerBalance_1">
+			<parameters>transmission_ZM_ZW 556</parameters>
+		</constraint>
+		<constraint name="utilityFunction_ZW_ZM" arity="1" scope="transmission_ZM_ZW" reference="maximise_utilityFunction_1">
+			<parameters>transmission_ZM_ZW 290 0</parameters>
+		</constraint>
+		<constraint name="powerBalance_2_ZW" arity="2" scope="transmission_ZW_BW transmission_ZW_ZM" reference="powerBalance_2">
+			<parameters>transmission_ZW_BW transmission_ZW_ZM 310</parameters>
+		</constraint>
+		<constraint name="utilityFunction_ZW_ZM" arity="2" scope="transmission_ZW_BW transmission_ZW_ZM" reference="maximise_utilityFunction_2">
+			<parameters>transmission_ZW_BW transmission_ZW_ZM -1000 -290 0</parameters>
+		</constraint>
+		<constraint name="withinMaxCapacity_transmission_BW_ZW" arity="1" scope="transmission_BW_ZW" reference="withinMaxCapacity">
+			<parameters>transmission_BW_ZW 47097</parameters>
+		</constraint>
+		<constraint name="withinMaxCapacity_transmission_ZM_ZW" arity="1" scope="transmission_ZM_ZW" reference="withinMaxCapacity">
+			<parameters>transmission_ZM_ZW 59616</parameters>
+		</constraint>
+		<constraint name="withinMaxCapacity_transmission_ZW_BW" arity="1" scope="transmission_ZW_BW" reference="withinMaxCapacity">
+			<parameters>transmission_ZW_BW 47097</parameters>
+		</constraint>
+		<constraint name="withinMaxCapacity_transmission_ZW_ZM" arity="1" scope="transmission_ZW_ZM" reference="withinMaxCapacity">
+			<parameters>transmission_ZW_ZM 59616</parameters>
+		</constraint>
+	</constraints>
+	<functions>
+		<function name="maximise_utilityFunction_1" return="int">
+			<parameters>int transmission_BW_ZW int benefit_0 int cost</parameters>
+			<expression>
+				<functional>if(lt(transmission_BW_ZW, 0), 0, mul(transmission_BW_ZW, benefit_0))</functional>
+			</expression>
+		</function>
+		<function name="maximise_utilityFunction_2" return="int">
+			<parameters>int transmission_ZW_BW int transmission_ZW_ZM int benefit_0 int benefit_1 int cost</parameters>
+			<expression>
+				<functional>add(if(lt(transmission_ZW_BW, 0), 0, mul(transmission_ZW_BW, benefit_0)), if(lt(transmission_ZW_ZM, 0), 0, mul(transmission_ZW_ZM, benefit_1)))</functional>
+			</expression>
+		</function>
+	</functions>
+</instance>
