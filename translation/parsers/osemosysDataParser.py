@@ -89,6 +89,13 @@ class osemosysDataParserClass(dataParserClass):
             self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacity_{year-1}'].fillna(0)
             self.merged_df.drop(columns=[f'capacity_{year-1}'], inplace=True)
         self.logger.debug("Data loaded successfully for year %s", year)
+    
+    def get_technologies(self):
+        self.logger.debug("Getting technologies")
+        if self.merged_df is None:
+            raise ValueError("Data not loaded. Please call load_data() first.")
+        
+        return self.merged_df[['TECHNOLOGY']].drop_duplicates().set_index('TECHNOLOGY')
 
     def get_country_data(self, country, time):
         self.logger.debug("Getting data for %s in %s", country, time)
@@ -414,7 +421,7 @@ class osemosysDataParserClass(dataParserClass):
         technologies_df['COUNTRY'] = country
         technologies_df['TECHNOLOGY'] = technologies_df['COUNTRY'] + technologies_df['TECHNOLOGY']
 
-        return technologies_df
+        return technologies_df[:5]
     
     def extract_output_activity_ratio(self, year):
         technologies_df = pd.read_excel(self.data_file_path, sheet_name="OutputActivityRatio")
@@ -440,4 +447,3 @@ class osemosysDataParserClass(dataParserClass):
         fuels_df['COUNTRY'] = fuels_df[0].map(lambda x: x[:2])
         fuels_df.drop(columns=[0], inplace=True)
         return fuels_df
-

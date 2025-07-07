@@ -34,7 +34,8 @@ config:
     fuel_code_file_path: ./osemosys_data/fuelcodes(in).csv
     tech_code_file_path: ./osemosys_data/techcodes(in).csv
     representation_per_year: ['S1D1', 'S1D2', 'S2D1', 'S2D2', 'S3D1', 'S3D2', 'S4D1', 'S4D2'] # Representations inside an year
-    timeout_time_step: 180 # seconds
+    timeout_time_step: 60 # seconds
+    steps_rate_activity: 200
     missing_computation: True
     max_iterations: 30
     delta_marginal_cost: 0.05

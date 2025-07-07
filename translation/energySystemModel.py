@@ -3,6 +3,7 @@ from translation.parsers.osemosysDataParser import osemosysDataParserClass
 from translation.xmlGenerator import XMLGeneratorClass
 from translation.energyAgentModel import EnergyAgentClass
 from translation.transmissionModel import TransmissionModelClass
+from translation.xmlEnergyReader import xmlEnergyReader
 from deprecated import deprecated
 import pandas as pd
 import logging
@@ -37,9 +38,10 @@ class EnergyModelClass:
         self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
         self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
         self.marginal_costs_df = None
-        self.results_df = None
         self.demand_map = {}
-        self.data = {}
+        self.country_data_per_time = {}
+
+        self.results_df = None
 
     def create_logger(self, log_level, log_file):
         log_dir = os.path.dirname(log_file)
@@ -70,27 +72,38 @@ class EnergyModelClass:
         for year in tqdm(self.years, desc="Solving energy model"):
             self.data_parser.load_data(year=year, countries=self.countries, new_installable_capacity_df=self.results_df)
             self.solve_year(year)
-            self.update_data(year)
         self.logger.info("Energy model solved")
     
     def solve_year(self, year):
         self.logger.info(f"Solving the energy model for {year}")
-        self.data[year] = {}
         
         for t in tqdm(self.time_resolution, desc=f"Solving year {year}"):
-            self.data[year][t] = {}
             self.build_demand_map(year, t)
-            marginal_costs_df = self.solve_internal_DCOP(t, year)
+            self.extract_data(year, t)
             for k in tqdm(range(self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
+                self.reader = self.prepare_reader(k=k, t=t, year=year)
+                marginal_costs_df = self.solve_internal_DCOP(t, year)
                 if self.check_convergence(marginal_costs_df):
                     self.logger.info(f"Convergence reached for time {t} and year {year} after {k} iterations")
                     self.solve_transmission_problem(t, year)
+                    self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"))
                     break
                 self.solve_transmission_problem(t, year)
-                marginal_costs_df = self.solve_internal_DCOP(t, year)
+                self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"))
+            self.update_data(t, year)
             if k == self.max_iteration:
                 self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
             marginal_costs_df = None
+    
+    def prepare_reader(self, k, t, year):
+        self.logger.debug(f"Preparing XML reader for iteration {k}, time {t}, year {year}")
+
+        return xmlEnergyReader(
+            k=k,
+            t=t,
+            year=year,
+            countries=self.countries,
+        )
 
     def solve_internal_DCOP(self, t, year):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
@@ -113,52 +126,28 @@ class EnergyModelClass:
             }
             for country in self.countries
         }
-        df = pd.DataFrame.from_dict(data, orient='index')
-        
-        for file_name in os.listdir(output_folder_path):
-            if file_name.endswith(".xml"):
-                file_path = os.path.join(output_folder_path, file_name)
-                country = file_name.split("_")[0]
-                demand = file_name.split("_")[1]
-                tree = ET.parse(file_path)
-                root = tree.getroot()
-                valuation = root.attrib.get("valuation")
-                if valuation is None or not str(valuation).isdigit():
-                    demand_type = file_name.split("_")[1][0]
-                    fallback_order = {
-                        '-': ['0', '+'],
-                        '+': ['0', '-'],
-                        '0': ['+', '-']
-                    }.get(demand_type, ['0', '+', '-'])  # default fallback order
 
-                    for fallback in fallback_order:
-                        if countries_check[country].get(fallback) != -1:
-                            valuation = countries_check[country][fallback]
-                            self.logger.debug(f"Using fallback valuation {valuation} for country {country} and demand {demand}")
-                            break
-                    if valuation is None or not isinstance(valuation, int):
-                        self.logger.error(f"File {file_name} has an invalid 'valuation' parameter: {valuation}")
-                        raise ValueError(f"File {file_name} has an invalid 'valuation' parameter: {valuation}")
-                
-                costs = 0
-                for assignment in root.findall("assignment"):
-                    var = assignment.attrib["variable"]
-                    value = int(assignment.attrib["value"])
-                    tech, attr = var.split("_")
+        output_df = self.reader.get_internal_outputs()
+        output_df = output_df.merge(self.data, left_on='technology', right_on='TECHNOLOGY', how='left')
 
-                    if attr == "capacity":
-                        costs += value * (self.data[year][t][tech]['capital_cost'] - self.data[year][t][tech]['min_installed_capacity']) 
-                        costs += value * self.data[year][t][tech]['fixed_cost'] * self.demand_map[t]['year_split']
-                    elif attr == "rateActivity":
-                        costs += value * self.data[year][t][tech]['variable_cost']
+        output_df['total_cost'] = (
+            output_df['capacity'] * (output_df['CAPITAL_COST'] - output_df['MIN_INSTALLED_CAPACITY']) +
+            output_df['rateActivity'] * output_df['VARIABLE_COST'] +
+            output_df['FIXED_COST'] * output_df['year_split']
+        )
 
-                self.logger.debug(f"Processing file {file_name} with valuation {valuation}")
-                df.at[country, demand] = costs
-                df.at[country, "marginal_demand"] = self.demand_map[t][country]['marginal_demand']
-        df['MC_import'] = (df["0"] - df[f"-{self.delta_marginal_cost}"]) / (df['marginal_demand'])
-        df['MC_export'] = (df[f"+{self.delta_marginal_cost}"] - df["0"]) / (df['marginal_demand'])
-        df[['MC_import', 'MC_export']] = df[['MC_import', 'MC_export']].clip(lower=0)
-        return df
+        agg = output_df.groupby(['country', 'demand_type'], as_index=False)['total_cost'].sum()
+        pivot = agg.pivot(index='country', columns='demand_type', values='total_cost').fillna(0)
+
+        pivot['marginal_demand'] = [self.demand_map[t][c]['marginal_demand'] for c in pivot.index]
+
+        pivot['MC_import'] = (pivot["0"] - pivot[f"-{self.delta_marginal_cost}"]) / pivot['marginal_demand']
+        pivot['MC_export'] = (pivot[f"+{self.delta_marginal_cost}"] - pivot["0"]) / pivot['marginal_demand']
+        pivot[['MC_import', 'MC_export']] = pivot[['MC_import', 'MC_export']].clip(lower=0)
+
+        self.reader.set_general_picture(pivot)
+
+        return pivot
 
     def solve_transmission_problem(self, time, year):
         self.logger.info(f"Solving transmission problem for time {time}")
@@ -180,7 +169,7 @@ class EnergyModelClass:
             name=f"transmission_problem_{time}.xml",
         )
 
-        _, output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
+        output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
         self.update_demand(time, output_folder)
         self.logger.debug(f"Transmission problem solved for time {time}")
 
@@ -199,98 +188,68 @@ class EnergyModelClass:
     
     def update_demand(self, time, output_folder):
         self.logger.info("Updating demand based on transmission problem results")
-        file = os.listdir(output_folder)[0]
-        
-        file_path = os.path.join(output_folder, file)
-        tree = ET.parse(file_path)
-        root = tree.getroot()
 
-        for assignment in root.findall("assignment"):
-            variable = assignment.attrib["variable"]
-            value = int(assignment.attrib["value"])
-            if variable.startswith("transmission_"):
-                _, country1, country2 = variable.split("_")
-                self.demand_map[time][country1]['demand'] += value
+        transmission_outputs = self.reader.get_transmission_outputs()
+        for start_country, exchange in transmission_outputs.groupby('start_country')['exchange'].sum().items():
+            self.demand_map[time][start_country]['demand'] += exchange
 
         for c in self.countries:    
             self.demand_map[time][c]['marginal_demand'] = self.demand_map[time][c]['demand'] * self.delta_marginal_cost
 
-    def update_data(self, year):
-        self.logger.debug(f"Updating data for year {year}")
+    def update_data(self, t, year):
+        self.logger.debug(f"Updating data for year {year} and timeslice {t}")
 
-        base_folder = os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}")
-        
-        # Store max capacities and rate activities
-        max_capacities = defaultdict(int)
-        rate_activities = defaultdict(dict)  # tech -> {timeslice: value}
+        outputs_df = self.reader.get_internal_outputs()
+        outputs_df = outputs_df[outputs_df['demand_type'] == '0']
+        outputs_df = outputs_df[['technology', 'capacity', ]]
 
-        for t in self.time_resolution:
-            for problem_type in ["internal"]:
-                output_folder = os.path.join(base_folder, str(t), problem_type, "outputs")
-                if not os.path.exists(output_folder):
-                    continue
-
-                for file_name in os.listdir(output_folder):
-                    if file_name.endswith("_output.xml"):
-                        file_path = os.path.join(output_folder, file_name)
-                        root = ET.parse(file_path).getroot()
-                        for assignment in root.findall("assignment"):
-                            var = assignment.attrib["variable"]
-                            value = int(assignment.attrib["value"])
-                            tech, attr = var.split("_")
-
-                            if attr == "capacity":
-                                max_capacities[tech] = max(max_capacities[tech], value)
-                            elif attr == "rateActivity":
-                                rate_activities[tech][t] = value
-
-        # Build the final result DataFrame
-        all_techs = set(max_capacities) | set(rate_activities)
-        result_df = pd.DataFrame(index=sorted(all_techs))
-
-        # Add capacity column
-        result_df[f"capacity_{year}"] = result_df.index.map(lambda tech: max_capacities.get(tech, 0))
-
-        # Add rateActivity per timeslice
-        for t in self.time_resolution:
-            result_df[f"rateActivity_{year}_{t}"] = result_df.index.map(
-                lambda tech: rate_activities.get(tech, {}).get(t, 0)
-            )
         if self.results_df is None:
-            self.results_df = result_df
+            self.results_df = self.data[['TECHNOLOGY', 'MIN_INSTALLED_CAPACITY']].copy()
+            self.results_df.rename(columns={'MIN_INSTALLED_CAPACITY': 'baseline'}, inplace=True)
         else:
-            # Combine with previous results, aligning on index and columns
-            self.results_df = pd.concat([self.results_df, result_df], axis=0, sort=False)
-            self.results_df = self.results_df[~self.results_df.index.duplicated(keep='last')]
-        self.results_df['TECHNOLOGY'] = self.results_df.index
-        self.results_df['COUNTRY'] = self.results_df['TECHNOLOGY'].apply(lambda x: x[:2])
-        self.results_df.to_csv(self.config_parser.get_output_file_path() + f"/results.csv")
+            if f'capacity_{year}' not in self.results_df.columns:
+                self.results_df = self.results_df.merge(
+                    outputs_df, 
+                    left_on='TECHNOLOGY',
+                    right_on='technology',
+                    how='left'
+                )
+                self.results_df.rename(columns={'capacity': f'capacity_{year}'}, inplace=True)
+            else:
+                self.results_df[f'capacity_{year}'] = max(
+                    self.results_df[f'capacity_{year}'],
+                    outputs_df['capacity']
+                )
 
         if self.config_parser.get_expansion_enabled():
             raise NotImplementedError("Expansion is not implemented yet.")
-        
-    def extract_costs(self, data, year, time):
-        self.logger.debug("Extracting costs from the data")
-        for tech, row in data.iterrows():
-            self.data[year][time][tech] = {
-                'capital_cost': row['CAPITAL_COST'],
-                'variable_cost': row['VARIABLE_COST'],
-                'fixed_cost': row['FIXED_COST'],
-                'min_installed_capacity': row['MIN_INSTALLED_CAPACITY'] if pd.notna(row['MIN_INSTALLED_CAPACITY']) else 0,
-                'operational_lifetime': row['OPERATIONAL_LIFETIME'],
-            }
     
+    def extract_data(self, year, time):
+        for country in self.countries:
+            self.country_data_per_time[country] = self.data_parser.get_country_data(country, time)
+        self.extract_costs(self.country_data_per_time, time)
+
+    def extract_costs(self, data, time):
+        self.logger.debug("Extracting costs from the data")
+
+        all_data = []
+        for c in self.countries:
+            country_data = data[c][[ 'CAPITAL_COST', 'VARIABLE_COST', 'FIXED_COST', 'MIN_INSTALLED_CAPACITY', 'OPERATIONAL_LIFETIME']].copy()
+            country_data['year_split'] = self.demand_map[time]['year_split']
+            all_data.append(country_data)
+        self.data = pd.concat(all_data, ignore_index=False)
+        self.data['TECHNOLOGY'] = self.data.index
+        self.data.reset_index(drop=True, inplace=True)
+
     def create_internal_DCOP(self, country, time, year):
         self.logger.debug(f"Creating internal DCOP for {country} at time {time} and year {year}")
         if not os.path.exists(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems")):
             os.makedirs(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems"))
 
-        data = self.data_parser.get_country_data(country, time)
-        self.extract_costs(data, year, time)
         energy_country_class = EnergyAgentClass(
             country=country,
             logger=self.logger,
-            data=data,
+            data=self.country_data_per_time[country],
             year_split=self.demand_map[time]['year_split'],
             demand=self.demand_map[time][country]['demand'],
             xml_file_path=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems")
@@ -355,36 +314,10 @@ class EnergyModelClass:
             for future in as_completed(futures):
                 future.result()  # Wait for each thread to complete
 
-        # Check that each output file in the folder contains a "valuation" parameter, so the run was successful
-        if 'transmission' not in folder:
-            countries_check = dict.fromkeys(self.countries, dict.fromkeys(['-', '+', '0'], -1)) 
-        else:
-            countries_check = {}
-
-        for file_name in os.listdir(output_folder):
-            if file_name.endswith("_output.xml"):
-                file_path = os.path.join(output_folder, file_name)
-                try:
-                    tree = ET.parse(file_path)
-                    root = tree.getroot()
-                    if "valuation" not in root.attrib and 'transmission' not in folder:
-                        self.logger.warning(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
-                        countries_check[file_name.split('_')[0]][file_name.split('_')[1][0]] = 0
-                    elif "valuation" in root.attrib and 'transmission' not in folder:
-                        countries_check[file_name.split('_')[0]][file_name.split('_')[1][0]] = int(root.attrib["valuation"])
-                    elif "valuation" not in root.attrib and 'transmission' in folder:
-                        self.logger.error(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
-                        raise ValueError(f"File {file_name} does not have a 'valuation' parameter. It might not have been solved correctly.")
-                    else:
-                        try:
-                            int(root.attrib["valuation"])
-                        except (ValueError, TypeError):
-                            self.logger.error(f"File {file_name} has an invalid 'valuation' parameter: {root.attrib['valuation']}")
-                            raise ValueError(f"File {file_name} has an invalid 'valuation' parameter: {root.attrib['valuation']}")
-                except ET.ParseError as e:
-                    self.logger.error(f"Error parsing XML file {file_name}: {e}")
-                    raise ValueError(f"Error parsing XML file {file_name}: {e}")
-
+        if 'transmission' in folder:
+            return self.reader.load(type='transmission', output_folder_path=output_folder)
+        
+        countries_check = self.reader.load(type='internal', output_folder_path=output_folder)
         return countries_check, output_folder
     
     def create_domains(self, country, time, problem_type='internal'):
@@ -405,7 +338,7 @@ class EnergyModelClass:
                 'rateActivity_domain': range(
                     0,
                     round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']*0.10),
-                    round(self.demand_map[time][country]['demand']/200)
+                    round(self.demand_map[time][country]['demand']/self.config_parser.get_steps_rate_activity() )
                 )
             }
             return domains_mapping

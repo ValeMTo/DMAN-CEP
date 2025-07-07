@@ -66,6 +66,14 @@ class ConfigParserClass:
     def get_years(self):
         return self.config['outline']['years']
     
+    def get_steps_rate_activity(self):
+        """
+        Returns the steps rate activity for the model.
+        :return: int
+        """
+        self.logger.debug("Steps rate activity set in config parser")
+        return self.config['outline']['steps_rate_activity']
+    
     def get_domains(self):
         """
         Returns the domains for the model.
