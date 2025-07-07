@@ -91,7 +91,7 @@ class xmlEnergyReader():
         # After filling, check for any remaining zeros and raise an error if found
         for country in self.countries:
             for demand_type in ['-', '+', '0']:
-                if self.countries_check[country][demand_type] == 0:
+                if self.countries_check[country][demand_type] == 0 or self.countries_check[country][demand_type] == -1:
                     raise ValueError(f"Zero still present for country '{country}' and demand type '{demand_type}' after attempting to fill missing values.")
         
 
