@@ -29,7 +29,8 @@ class EnergyModelClass:
         self.years = self.config_parser.get_years()
 
         self.data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
-        self.transmission_data = self.data_parser.get_transmission_data(self.countries)
+        self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries)
+        self.transmission_data = self.transmission_data_capacity.copy()
         self.xml_generator = XMLGeneratorClass(logger = self.logger)
 
 
@@ -94,6 +95,7 @@ class EnergyModelClass:
             if k == self.max_iteration:
                 self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
             marginal_costs_df = None
+            self.transmission_data = self.transmission_data_capacity.copy()  # Reset transmission data for the next time slice
     
     def prepare_reader(self, k, t, year):
         self.logger.debug(f"Preparing XML reader for iteration {k}, time {t}, year {year}")
@@ -195,6 +197,14 @@ class EnergyModelClass:
 
         for c in self.countries:    
             self.demand_map[time][c]['marginal_demand'] = self.demand_map[time][c]['demand'] * self.delta_marginal_cost
+
+        for start_country, end_country, exchange in transmission_outputs.itertuples(index=False):
+            if start_country != end_country:
+                self.transmission_data.loc[
+                    (self.transmission_data['start_country'] == start_country) & 
+                    (self.transmission_data['end_country'] == end_country), 
+                    'capacity'
+                ] -= abs(exchange)
 
     def update_data(self, t, year):
         self.logger.debug(f"Updating data for year {year} and timeslice {t}")
