@@ -10,11 +10,12 @@ import logging
 from tqdm import tqdm
 import folium
 from folium.plugins import MarkerCluster
-
+import time
 class transmissionRetrieverClass():
     def __init__(self, logger, regions):
         self.logger = logger
         self.regions = regions
+        
 
     def geom_to_overpass_poly(self, geom):
         """Convert a Polygon or MultiPolygon to Overpass poly string."""
@@ -57,47 +58,50 @@ class transmissionRetrieverClass():
     def get_power_lines(self):
         self.logger.info("Querying Overpass API for power lines")
         countries = self.get_borders(self.regions)
-        all_lines = []
 
-        for _, row in countries.iterrows():
-            iso_code = row['ISO_A2']
-            geometry = row['geometry']
+        # Sum all geometries in the countries GeoDataFrame into a single MultiPolygon
+        if len(countries) > 1:
+            merged_geom = countries.unary_union
+        else:
+            merged_geom = countries.geometry.iloc[0]
 
+        poly_coords = self.geom_to_overpass_poly(merged_geom)
+        query_parts = []
+        for poly in poly_coords:
+            query_parts.append(f"""
+                way["power"="line"](poly:"{poly}");
+                relation["power"="line"](poly:"{poly}");
+            """)
+
+        overpass_query = f"""
+            [out:json][timeout:180];
+            (
+                {''.join(query_parts)}
+            );
+            out body;
+            >;
+            out skel qt;
+        """
+
+        max_retries = 5
+        for attempt in range(max_retries):
             try:
-                poly_coords = self.geom_to_overpass_poly(geometry)
-                query_parts = []
-                for poly in poly_coords:
-                    query_parts.append(f"""
-                        way["power"="line"](poly:"{poly}");
-                        relation["power"="line"](poly:"{poly}");
-                    """)
-
-                overpass_query = f"""
-                    [out:json][timeout:180];
-                    (
-                        {''.join(query_parts)}
-                    );
-                    out body;
-                    >;
-                    out skel qt;
-                """
-
                 response = requests.post("https://overpass-api.de/api/interpreter", data={'data': overpass_query})
                 response.raise_for_status()
                 osm_data = response.json()
                 gdf = self.parse_osm_lines(osm_data)
-                self.logger.info(f"Retrieved {len(gdf)} power lines for {iso_code}")
-                all_lines.append(gdf)
-
+                self.logger.info(f"Retrieved {len(gdf)} power lines for all countries")
+                break
             except Exception as e:
-                self.logger.error(f"Error retrieving lines for {iso_code}: {e}")
-                continue
+                self.logger.error(f"Attempt {attempt+1}/{max_retries} - Error retrieving lines: {e}")
+                time.sleep(5)
+                if attempt == max_retries - 1:
+                    raise Exception(f"Failed to retrieve power lines after {max_retries} attempts: {e}")
+        if gdf.empty:
+            self.logger.warning("No power lines found in the specified regions.")
+            return countries, gdf
 
-        if not all_lines:
-            self.logger.warning("No power lines retrieved.")
-            return gpd.GeoDataFrame(columns=['geometry'], geometry='geometry', crs="EPSG:4326")
-
-        result = pd.concat(all_lines, ignore_index=True)
+        result = gdf.reset_index(drop=True)
         self.logger.info(f"Total retrieved power lines: {len(result)}")
         return countries, result
 
@@ -130,8 +134,11 @@ class transmissionRetrieverClass():
         return df.loc[keep_indices].drop(columns=['country_pair']).reset_index(drop=True)
 
     def get_borders(self, countries_array):
+        # Handle NM special case: replace NM with NA for shapefile lookup, then revert to NM
+        countries_array_fixed = ["NA" if c == "NM" else c for c in countries_array]
         world = gpd.read_file("./data/shapefiles/ne_110m_admin_0_countries.shp")
-        filtered_countries = world[world['ISO_A2'].isin(countries_array)]
+        filtered_countries = world[world['ISO_A2'].isin(countries_array_fixed)].copy()
+        filtered_countries['ISO_A2'] = filtered_countries['ISO_A2'].replace("NA", "NM")
         return filtered_countries
     
     def get_line_countries(self, line, countries):
@@ -153,7 +160,7 @@ class transmissionRetrieverClass():
         - voltage_kv (float or int): Nominal voltage of the line in kilovolts (kV)
 
         Returns:
-        - (min_capacity, max_capacity): Tuple with estimated capacity range in MW
+        - capacity: Tuple with estimated capacity range in MWh
         """
         if voltage_kv < 60:
             return 50
@@ -172,7 +179,7 @@ class transmissionRetrieverClass():
         else:  # HVDC or very high-voltage AC
             return 2500
     
-    def extract_cross_border_lines(self, unit='TJ'):
+    def extract_cross_border_lines(self, unit='TJ', yearly=False):
         self.logger.info("Extracting cross-border lines")
 
         countries, lines = self.get_power_lines()
@@ -194,7 +201,7 @@ class transmissionRetrieverClass():
                     })
         df = pd.DataFrame(cross_border_lines)
         self.logger.info(f"Extracted {len(df)} cross-border lines")
-        df['capacity'] = df['voltage'].fillna(150).apply(self.estimate_capacity_per_circuit)*df['circuit'].fillna(1)
+        df['capacity'] = df['voltage'].fillna(150).apply(self.estimate_capacity_per_circuit)*df['circuit'].fillna(1)  # MWh per year
         #df = self.deduplicate_cross_border_lines(df, tolerance=1e-6)
 
         df = df.groupby(['start_country', 'end_country'], as_index=False).agg({
@@ -216,13 +223,15 @@ class transmissionRetrieverClass():
             df['capacity'] = df['capacity'] * 1e-3 * 3.6
         else:
             raise ValueError("Unsupported unit. Use 'GWh' or 'TJ'.")
+        if yearly:
+            df['capacity'] = df['capacity'] * 8760
         return df
     
 
 if __name__ == "__main__":
     # Example usage
     logger = logging.getLogger(__name__)
-    regions = ["BW", "NA", "ZW", "ZM"]  # Example country codes
+    regions = ["AO", "BW", "CD", "LS", "MW", "MZ", "NA", "SZ", "TZ", "ZA", "ZM", "ZW"]  # Updated country codes
     retriever = transmissionRetrieverClass(logger, regions)
     cross_border_lines = retriever.extract_cross_border_lines()
     print(cross_border_lines)
