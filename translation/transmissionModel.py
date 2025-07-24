@@ -6,12 +6,11 @@ import os
 from itertools import product
 
 class TransmissionModelClass:
-    def __init__(self, countries, data, delta_demand_map, year_split, marginal_costs_df, cost_transmission_line, logger, xml_file_path, expansion_enabled):
+    def __init__(self, countries, data, delta_demand_map, marginal_costs_df, cost_transmission_line, logger, xml_file_path, expansion_enabled):
         self.logger = logger
         self.countries = countries
         self.data = data
         self.delta_demand_map = delta_demand_map
-        self.year_split = year_split
         self.marginal_costs_df = self.reduce_marginal_cost_magnitude(marginal_costs_df)
         self.cost_transmission_line = cost_transmission_line
         self.xml_file_path = xml_file_path
@@ -55,11 +54,11 @@ class TransmissionModelClass:
             )
 
 
-        # Constraint: Transmission capacity should be less than or equal to the maximum capacity & Utility function
+        # Constraint: Transmission capacity should be less than or equal to the maximum capacity
         for idx, row in self.data.iterrows():
             self.xml_generator.add_maximum_capacity_constraint(
                 variable_name=f"transmission_{row['start_country']}_{row['end_country']}",
-                max_capacity=round(row['capacity']*(8760*self.year_split)),
+                max_capacity=round(row['capacity']*0.7),
             )
 
     def reduce_marginal_cost_magnitude(self, df):
