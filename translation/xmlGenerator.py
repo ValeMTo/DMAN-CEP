@@ -1061,23 +1061,24 @@ class XMLGeneratorClass:
             return add(abs_val(vars[0]), build_recursive_add_expression(vars[1:]))
 
         num = len(flow_variables)
-        if not isinstance(delta, int):
-            raise ValueError("delta must be an integer")
+        if num > 0:
+            if not isinstance(delta, int):
+                raise ValueError("delta must be an integer")
 
-        if not self.find_predicate(f"powerBalance_{num}"):
-            self.add_predicate(
-                name=f"powerBalance_{num}", 
-                parameters=" ".join([f"int var_{i}" for i in range(num)]) + " int delta",
-                functional=boolean_le(build_recursive_add_expression([f"var_{i}" for i in range(num)]), "delta")
+            if not self.find_predicate(f"powerBalance_{num}"):
+                self.add_predicate(
+                    name=f"powerBalance_{num}", 
+                    parameters=" ".join([f"int var_{i}" for i in range(num)]) + " int delta",
+                    functional=boolean_le(build_recursive_add_expression([f"var_{i}" for i in range(num)]), "delta")
+                )
+            self.add_constraint(
+                name=f"powerBalance_{num}_{extra_name}",
+                arity=num,
+                scope=f"{' '.join(flow_variables)}",
+                reference=f"powerBalance_{num}",
+                parameters=f"{' '.join(flow_variables)} {delta}"
             )
-        self.add_constraint(
-            name=f"powerBalance_{num}_{extra_name}",
-            arity=num,
-            scope=f"{' '.join(flow_variables)}",
-            reference=f"powerBalance_{num}",
-            parameters=f"{' '.join(flow_variables)} {delta}"
-        )
-        
+            
     def add_utility_function_constaint(self, extra_name, variables, import_marginal_costs, export_marginal_costs, cost):
         def build_recursive(variables):
             if len(variables) == 1:
