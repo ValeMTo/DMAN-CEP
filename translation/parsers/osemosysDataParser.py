@@ -39,7 +39,7 @@ class osemosysDataParserClass(dataParserClass):
 
         return year_split_coefficient, specified_demand 
     
-    def load_data(self, year, countries, new_installable_capacity_df=None):
+    def load_data(self, year, countries):
         self.logger.debug("Loading data from Excel file")
         
         dfs = {}
@@ -84,11 +84,13 @@ class osemosysDataParserClass(dataParserClass):
         for key, df in dfs.items():
             self.merged_df = self.merged_df.merge(df, on=[col for col in df.columns if col in self.merged_df.columns], how='left')
 
+        self.logger.debug("Data loaded successfully for year %s", year)
+
+    def add_previous_installed_capacity(self, year, new_installable_capacity_df=None):
         if new_installable_capacity_df is not None:
             self.merged_df = self.merged_df.merge(new_installable_capacity_df[['COUNTRY', 'TECHNOLOGY', f'capacity_{year-1}']], on=['COUNTRY', 'TECHNOLOGY'], how='left')
             self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacity_{year-1}'].fillna(0)
             self.merged_df.drop(columns=[f'capacity_{year-1}'], inplace=True)
-        self.logger.debug("Data loaded successfully for year %s", year)
     
     def get_technologies(self):
         self.logger.debug("Getting technologies")
@@ -421,7 +423,7 @@ class osemosysDataParserClass(dataParserClass):
         technologies_df['COUNTRY'] = country
         technologies_df['TECHNOLOGY'] = technologies_df['COUNTRY'] + technologies_df['TECHNOLOGY']
 
-        return technologies_df[:5]
+        return technologies_df
     
     def extract_output_activity_ratio(self, year):
         technologies_df = pd.read_excel(self.data_file_path, sheet_name="OutputActivityRatio")
