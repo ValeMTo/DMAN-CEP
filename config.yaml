@@ -2,39 +2,32 @@ config:
   logging:
     file: ./logs/app.log
     level: DEBUG
-  name: BW_limited
+  name: SAPP
   outline:
     countries:
+    - AO
     - BW
+    - CD
+    - LS
+    - MW
+    - MZ
+    - NM
+    - SZ
+    - TZ
+    - ZA
     - ZM
     - ZW
     years:
     - 2030
-    - 2031
-    - 2032
-    - 2033
-    - 2034
     - 2035
-    - 2036
-    - 2037
-    - 2038
-    - 2039
     - 2040
-    - 2041
-    - 2042
-    - 2043
-    - 2044
     - 2045
-    - 2046
-    - 2047
-    - 2048
-    - 2049
     - 2050
     data_file_path: ./osemosys_data/input_data/TEMBA_SSP4-60.xlsx
     fuel_code_file_path: ./osemosys_data/fuelcodes(in).csv
     tech_code_file_path: ./osemosys_data/techcodes(in).csv
     representation_per_year: ['S1D1', 'S1D2', 'S2D1', 'S2D2', 'S3D1', 'S3D2', 'S4D1', 'S4D2'] # Representations inside an year
-    timeout_time_step: 120 # seconds
+    timeout_time_step: 180 # seconds
     steps_rate_activity: 300
     missing_computation: True
     max_iterations: 30
@@ -51,4 +44,4 @@ config:
           min: -20000
           max: 20000
           step: 200
-  output_file_path: solutions/test-2030
+  output_file_path: solutions/test-SAPP-5-years
