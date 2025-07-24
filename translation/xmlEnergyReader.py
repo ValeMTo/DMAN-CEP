@@ -16,7 +16,6 @@ class xmlEnergyReader():
         self.df = pd.DataFrame()
         self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rateActivity'])
 
-        self.transmission_valuation = None
         self.transmission_df = pd.DataFrame(columns=['start_country', 'end_country', 'exchange'])
 
 
@@ -33,7 +32,7 @@ class xmlEnergyReader():
             raise ValueError(f"Unsupported type: {type}")
 
     def load_internal(self):
-        self.countries_check = dict.fromkeys(self.countries, dict.fromkeys(['-', '+', '0'], -1)) 
+        self.countries_check = {country: {'-': -1, '+': -1, '0': -1} for country in self.countries}
         rows = []
         for file_name in os.listdir(self.output_folder_path):
             if file_name.endswith("_output.xml"):
@@ -104,8 +103,6 @@ class xmlEnergyReader():
 
                 if "valuation" in root.attrib:
 
-                    self.transmission_valuation = int(root.attrib["valuation"])
-
                     rows = []
                     for assignment in root.findall("assignment"):
                         var = assignment.attrib["variable"]
@@ -135,7 +132,11 @@ class xmlEnergyReader():
             raise ValueError("Input must be a pandas DataFrame")
         self.df = df
 
-    def save(self, folder):
+    def save(self, folder, transmission_data):
+        if not transmission_data.empty:
+            transmission_data = transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
+            self.transmission_df = transmission_data
+
         file_path = os.path.join(folder, f"xmlEnergyReader_{self.k}_{self.t}_{self.year}.pkl")
         with open(file_path, 'wb') as f:
             pickle.dump({
@@ -145,7 +146,6 @@ class xmlEnergyReader():
                 'countries_check': self.countries_check,
                 'df': self.df,
                 'tech_df': self.tech_df,
-                'transmission_valuation': self.transmission_valuation,
                 'transmission_df': self.transmission_df
             }, f)
 
@@ -158,5 +158,4 @@ class xmlEnergyReader():
             self.countries_check = data['countries_check']
             self.df = data['df']
             self.tech_df = data['tech_df']
-            self.transmission_valuation = data['transmission_valuation']
             self.transmission_df = data['transmission_df']
