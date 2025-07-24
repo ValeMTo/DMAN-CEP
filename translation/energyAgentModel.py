@@ -19,7 +19,6 @@ class EnergyAgentClass:
         self.xml_file_path = xml_file_path
     
     def generate_xml(self, domains):
-        self.logger.debug(f"Generating XML for {self.name}")
         
         self.xml_generator.add_presentation(name=self.name, maximize='False')
         self.xml_generator.add_agents([self.name])
