@@ -4,6 +4,7 @@ from translation.xmlGenerator import XMLGeneratorClass
 from translation.energyAgentModel import EnergyAgentClass
 from translation.transmissionModel import TransmissionModelClass
 from translation.xmlEnergyReader import xmlEnergyReader
+from translation.worker import ThreadManager
 from deprecated import deprecated
 import pandas as pd
 import logging
@@ -16,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from threading import Thread
 
 
 class EnergyModelClass:
@@ -28,21 +30,27 @@ class EnergyModelClass:
         self.time_resolution = self.config_parser.get_annual_time_resolution()
         self.years = self.config_parser.get_years()
 
-        self.data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
-        self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries)
-        self.transmission_data = self.transmission_data_capacity.copy()
-        self.xml_generator = XMLGeneratorClass(logger = self.logger)
+        self.results_df = None
+        self.marginal_costs_df = None
+        self.demand_map = {}
+        self.country_data_per_time = {}
 
+        self.thread_manager = ThreadManager()
+        self.data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
+        self.thread_manager.run_parallel(
+            name=f'data_parser_load_{self.years[0]}',
+            func=self.data_parser.load_data,
+            args=(self.years[0], self.countries)
+        )
+        self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries, yearly=True)
+        self.transmission_data_max_capacity = self.transmission_data_capacity.copy()
+        self.transmission_data = pd.DataFrame()
+        self.xml_generator = XMLGeneratorClass(logger = self.logger)
 
         self.logger.info("Energy model initialized")
         self.max_iteration = self.config_parser.get_max_iteration()
         self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
         self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
-        self.marginal_costs_df = None
-        self.demand_map = {}
-        self.country_data_per_time = {}
-
-        self.results_df = None
 
     def create_logger(self, log_level, log_file):
         log_dir = os.path.dirname(log_file)
@@ -67,12 +75,24 @@ class EnergyModelClass:
                         'marginal_demand': demand * self.delta_marginal_cost,
                     }
         self.demand_map[t]['year_split'] = year_split # year_split is the same for all countries for timeslice t
+        self.transmission_data_max_capacity['capacity'] = self.transmission_data_capacity['capacity'] * self.demand_map[t]['year_split']
 
     def solve(self):
         self.logger.info("Solving the energy model")
-        for year in tqdm(self.years, desc="Solving energy model"):
-            self.data_parser.load_data(year=year, countries=self.countries, new_installable_capacity_df=self.results_df)
+        i = 0
+        while i < len(self.years):
+            year = self.years[i]
+            self.thread_manager.wait_for(f'data_parser_load_{year}')
+            self.data_parser.add_previous_installed_capacity(year, self.results_df)
+            if i + 1 < len(self.years):
+                self.thread_manager.run_parallel(
+                    name=f'data_parser_load_{self.years[i+1]}',
+                    func=self.data_parser.load_data,
+                    args=(self.years[i+1], self.countries)
+                )
             self.solve_year(year)
+            i += 1
+
         self.logger.info("Energy model solved")
     
     def solve_year(self, year):
@@ -87,16 +107,20 @@ class EnergyModelClass:
                 if self.check_convergence(marginal_costs_df):
                     self.logger.info(f"Convergence reached for time {t} and year {year} after {k} iterations")
                     self.solve_transmission_problem(t, year)
-                    self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"))
+                    self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
                     break
                 self.solve_transmission_problem(t, year)
-                self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"))
+                self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
             self.update_data(t, year)
             if k == self.max_iteration:
                 self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
             marginal_costs_df = None
-            self.transmission_data = self.transmission_data_capacity.copy()  # Reset transmission data for the next time slice
+            self.reset()
     
+    def reset(self):
+        self.transmission_data_max_capacity = self.transmission_data_capacity.copy()  # Reset transmission data for the next time slice
+        self.transmission_data = pd.DataFrame() # Reset transmission data for the next time slice
+
     def prepare_reader(self, k, t, year):
         self.logger.debug(f"Preparing XML reader for iteration {k}, time {t}, year {year}")
 
@@ -110,8 +134,16 @@ class EnergyModelClass:
     def solve_internal_DCOP(self, t, year):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
 
+        if not os.path.exists(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems")):
+            os.makedirs(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems"))
+
+        threads = []
         for country in self.countries:
-            self.create_internal_DCOP(country, t, year)
+            thread = Thread(target=self.create_internal_DCOP, args=(country, t, year))
+            threads.append(thread)
+            thread.start()
+        for thread in threads:
+            thread.join()
         countries_check, output_folder_path = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal"))
         marginal_costs_df = self.calculate_marginal_costs(t, year, output_folder_path, countries_check)
 
@@ -156,9 +188,8 @@ class EnergyModelClass:
 
         transmission_solver = TransmissionModelClass(
             countries=self.countries,
-            data=self.transmission_data,
+            data=self.transmission_data_max_capacity,
             delta_demand_map=self.demand_map[time],
-            year_split=self.demand_map[time]['year_split'],
             marginal_costs_df=self.marginal_costs_df[['MC_import', 'MC_export']],
             cost_transmission_line=self.config_parser.get_cost_transmission_line(),
             logger=self.logger,
@@ -172,7 +203,7 @@ class EnergyModelClass:
         )
 
         output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
-        self.update_demand(time, output_folder)
+        self.update_demand(time)
         self.logger.debug(f"Transmission problem solved for time {time}")
 
     def check_convergence(self, marginal_costs_df):
@@ -188,7 +219,7 @@ class EnergyModelClass:
         self.marginal_costs_df = marginal_costs_df
         return False
     
-    def update_demand(self, time, output_folder):
+    def update_demand(self, time):
         self.logger.info("Updating demand based on transmission problem results")
 
         transmission_outputs = self.reader.get_transmission_outputs()
@@ -200,11 +231,18 @@ class EnergyModelClass:
 
         for start_country, end_country, exchange in transmission_outputs.itertuples(index=False):
             if start_country != end_country:
-                self.transmission_data.loc[
-                    (self.transmission_data['start_country'] == start_country) & 
-                    (self.transmission_data['end_country'] == end_country), 
+                self.transmission_data_max_capacity.loc[
+                    (self.transmission_data_max_capacity['start_country'] == start_country) & 
+                    (self.transmission_data_max_capacity['end_country'] == end_country), 
                     'capacity'
                 ] -= abs(exchange)
+        if self.transmission_data.empty:
+            self.transmission_data = self.reader.get_transmission_outputs()
+        else:
+            self.transmission_data = pd.concat([self.transmission_data, self.reader.get_transmission_outputs()], ignore_index=True)
+            self.transmission_data = self.transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
+            self.logger.info("Demand updated based on transmission problem results")
+
 
     def update_data(self, t, year):
         self.logger.debug(f"Updating data for year {year} and timeslice {t}")
@@ -226,10 +264,13 @@ class EnergyModelClass:
                 )
                 self.results_df.rename(columns={'capacity': f'capacity_{year}'}, inplace=True)
             else:
-                self.results_df[f'capacity_{year}'] = max(
-                    self.results_df[f'capacity_{year}'],
-                    outputs_df['capacity']
+                merged_df = self.results_df.merge(
+                    outputs_df, 
+                    left_on='TECHNOLOGY',
+                    right_on='technology',
+                    how='left'
                 )
+                self.results_df[f'capacity_{year}'] = merged_df[[f'capacity_{year}', 'capacity']].max(axis=1)
 
         if self.config_parser.get_expansion_enabled():
             raise NotImplementedError("Expansion is not implemented yet.")
@@ -253,8 +294,6 @@ class EnergyModelClass:
 
     def create_internal_DCOP(self, country, time, year):
         self.logger.debug(f"Creating internal DCOP for {country} at time {time} and year {year}")
-        if not os.path.exists(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems")):
-            os.makedirs(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems"))
 
         energy_country_class = EnergyAgentClass(
             country=country,
@@ -319,7 +358,7 @@ class EnergyModelClass:
                 output_path = os.path.join(output_folder, f"{file_name.replace('.xml', '')}_output.xml")
                 self.solve_DCOP(input_path, output_path)
 
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_file, file_name) for file_name in os.listdir(problem_folder)]
             for future in as_completed(futures):
                 future.result()  # Wait for each thread to complete
@@ -340,25 +379,25 @@ class EnergyModelClass:
                 raise ValueError("Country and year must be provided for internal problem type.")
             
             domains_mapping = {
-                'capacity_domain': range(
+                'capacity_domain': list(range(
                     domains['capacity']['min'],
                     domains['capacity']['max'] + 1,
                     domains['capacity']['step']
-                ),
-                'rateActivity_domain': range(
+                )),
+                'rateActivity_domain': list(range(
                     0,
                     round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']*0.10),
                     round(self.demand_map[time][country]['demand']/self.config_parser.get_steps_rate_activity() )
-                )
+                ))
             }
             return domains_mapping
         elif problem_type == 'transmission':
             domains_mapping = {
-                'capacity_domain': range(
+                'capacity_domain': list(range(
                     domains['transmission']['min'],
                     domains['transmission']['max'] + 1,
                     domains['transmission']['step'], 
-                )
+                ))
             }
             return domains_mapping
 
