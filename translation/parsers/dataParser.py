@@ -12,7 +12,7 @@ class dataParserClass:
         """
         raise NotImplementedError("This method will be implemented in child classes")
     
-    def get_transmission_data(self, regions, cross_border_only=True):
+    def get_transmission_data(self, regions, cross_border_only=True, yearly=False):
         """
         Returns the transmission data for the specified regions.
         It returns a dataframe with the following columns:
@@ -27,7 +27,7 @@ class dataParserClass:
         retriever = transmissionRetrieverClass(self.logger, regions=regions)
         if cross_border_only:
             self.logger.info("Filtering cross-border lines")
-            return retriever.extract_cross_border_lines()
+            return retriever.extract_cross_border_lines(yearly=yearly)
         raise NotImplementedError("The method without cross-border lines is not implemented yet")
 
 
