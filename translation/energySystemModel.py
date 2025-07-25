@@ -9,12 +9,9 @@ from deprecated import deprecated
 import pandas as pd
 import logging
 import os
-from itertools import product
 from tqdm import tqdm
-import numpy as np
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import time
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from threading import Thread
