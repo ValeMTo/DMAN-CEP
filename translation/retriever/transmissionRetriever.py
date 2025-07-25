@@ -1,15 +1,10 @@
 import osmnx as ox
-import geopandas as gpd
 from shapely.geometry import Point, LineString, Polygon, MultiPolygon
 import pandas as pd
 import requests
 import geopandas as gpd
-import pycountry
-import overpass
 import logging
 from tqdm import tqdm
-import folium
-from folium.plugins import MarkerCluster
 import time
 class transmissionRetrieverClass():
     def __init__(self, logger, regions):
