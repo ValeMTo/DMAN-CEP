@@ -60,13 +60,13 @@ class osemosysDataParserClass(dataParserClass):
         dfs['total_annual_max_capacity'] = self.extract_total_annual_max_capacity(year=year, unit='MW')
         dfs['total_technology_annual_activity_upper_limit'] = self.extract_total_technology_annual_activity_upper_limit(year=year, unit='TJ')
         dfs['total_technology_annual_activity_lower_limit'] = self.extract_total_technology_annual_activity_lower_limit(year=year, unit='TJ')
-        dfs['emission_activity_ratio'] = self.extract_emission_activity_ratio(year=year)
+        #dfs['emission_activity_ratio'] = self.extract_emission_activity_ratio(year=year)
         #dfs['emissions_penalty'] = self.extract_emissions_penalty(year=year)
         #dfs['annual_emission_limit'] = self.extract_annual_emission_limit(year=year)
         dfs['output_activity_ratio'] = self.extract_output_activity_ratio(year=year)
         dfs['input_activity_ratio'] = self.extract_input_activity_ratio(year=year)
 
-        technologies_df = self.extract_technologies().drop_duplicates()
+        technologies_df = self.extract_technologies(all=True).drop_duplicates()
         emissions_df = self.extract_emissions().drop_duplicates()    
         fuels_df = self.extract_fuels().drop_duplicates()
         timeslices_df = self.extract_timeslices().drop_duplicates()
@@ -89,7 +89,7 @@ class osemosysDataParserClass(dataParserClass):
     def add_previous_installed_capacity(self, year, new_installable_capacity_df=None):
         if new_installable_capacity_df is not None:
             self.merged_df = self.merged_df.merge(new_installable_capacity_df[['COUNTRY', 'TECHNOLOGY', f'capacity_{year-1}']], on=['COUNTRY', 'TECHNOLOGY'], how='left')
-            self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacity_{year-1}'].fillna(0)
+            self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacit_{year-1}'].fillna(0)
             self.merged_df.drop(columns=[f'capacity_{year-1}'], inplace=True)
     
     def get_technologies(self):
@@ -169,7 +169,7 @@ class osemosysDataParserClass(dataParserClass):
         return new_df
     
     def extract_capacity_to_activity_unit(self):
-        capacity_to_activity_unit_df = pd.read_excel(self.data_file_path, sheet_name="CapacityToActivityUnit")
+        capacity_to_activity_unit_df = pd.read_excel(self.data_file_path, sheet_name="CapacityToActivityUnit", )
         capacity_to_activity_unit_df['COUNTRY'] = capacity_to_activity_unit_df['TECHNOLOGY'].map(lambda x: x[:2])
         capacity_to_activity_unit_df['TECH'] = capacity_to_activity_unit_df['TECHNOLOGY'].map(lambda x: x[2:])
 
@@ -283,7 +283,7 @@ class osemosysDataParserClass(dataParserClass):
         return discount_rate_df.iloc[0, 0]
     
     def extract_technology_operational_life(self):
-        operational_lifetime_df = pd.read_excel(self.data_file_path, sheet_name="OperationalLife")
+        operational_lifetime_df = pd.read_excel(self.data_file_path, sheet_name="OperationalLife", )
         operational_lifetime_df['COUNTRY'] = operational_lifetime_df['TECHNOLOGY'].map(lambda x: x[:2])
         operational_lifetime_df['TECHNOLOGY'] = operational_lifetime_df['TECHNOLOGY']
 
@@ -339,7 +339,7 @@ class osemosysDataParserClass(dataParserClass):
         return new_df
     
     def extract_emission_activity_ratio(self, year):
-        emission_activity_ratio_df = pd.read_excel(self.data_file_path, sheet_name="EmissionActivityRatio")
+        emission_activity_ratio_df = pd.read_excel(self.data_file_path, sheet_name="EmissionActivityRatio", )
         emission_activity_ratio_df['COUNTRY_TECH'] = emission_activity_ratio_df['TECHNOLOGY'].map(lambda x: x[:2])
         emission_activity_ratio_df['TECHNOLOGY'] = emission_activity_ratio_df['TECHNOLOGY']
         emission_activity_ratio_df['COUNTRY_EMI'] = emission_activity_ratio_df['EMISSION'].map(lambda x: x[:2])
@@ -387,11 +387,14 @@ class osemosysDataParserClass(dataParserClass):
 
         return technologies_df
     
-    def extract_technologies(self):
+    def extract_technologies(self, all=False):
         technologies_df = pd.read_excel(self.data_file_path, sheet_name="TECHNOLOGY", header=None)
         technologies_df['COUNTRY'] = technologies_df[0].map(lambda x: x[:2])
         technologies_df['TECHNOLOGY'] = technologies_df[0].map(lambda x: x[2:])
 
+        if all:
+            technologies_df['TECHNOLOGY'] = technologies_df['COUNTRY'] + technologies_df['TECHNOLOGY']
+            return technologies_df[['COUNTRY', 'TECHNOLOGY']]
         power_plants_df = pd.read_csv("./osemosys_data/techcodes(in).csv")
         power_plants_df = power_plants_df[power_plants_df['Group'] == 'Power_plants']
         power_plants_df = power_plants_df[['code (Old)']].rename(columns={'code (Old)': 'TECHNOLOGY'})
