@@ -69,6 +69,8 @@ class xmlEnergyReader():
         if not self.tech_df.empty:
             self.tech_df = self.tech_df.groupby(['technology', 'country', 'demand_type'], as_index=True).sum().reset_index()
 
+        self.fill_missing_countries()
+
         return self.countries_check
                 
     def fill_missing_countries(self):
@@ -91,7 +93,7 @@ class xmlEnergyReader():
         for country in self.countries:
             for demand_type in ['-', '+', '0']:
                 if self.countries_check[country][demand_type] == 0 or self.countries_check[country][demand_type] == -1:
-                    raise ValueError(f"Zero still present for country '{country}' and demand type '{demand_type}' after attempting to fill missing values.")
+                    raise ValueError(f"Zero/-1 still present for country '{country}' and demand type '{demand_type}' after attempting to fill missing values.")
         
 
     def load_transmission(self):

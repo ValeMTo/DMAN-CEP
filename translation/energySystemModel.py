@@ -313,10 +313,10 @@ class EnergyModelClass:
         self.logger.debug(f"Solving DCOP for {input_path} and saving to {output_path}")
         java_command = [
             'java', 
-            '-Xmx1G', 
+            '-Xmx2G', 
             '-ea',
             '-cp', 
-            'frodo2.18.1.jar:junit-4.13.2.jar:hamcrest-core-1.3.jar', 
+            'frodo2.19.jar:jdom2-2.0.6.jar:jacop-4.7.0.jar', 
             'frodo2.algorithms.AgentFactory', 
             '-timeout', 
             str(self.config_parser.get_timeout_time_steps()*1000), 
@@ -384,7 +384,7 @@ class EnergyModelClass:
                 'rateActivity_domain': list(range(
                     0,
                     round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']*0.10),
-                    round(self.demand_map[time][country]['demand']/self.config_parser.get_steps_rate_activity() )
+                    min(round(self.demand_map[time][country]['demand']/self.config_parser.get_steps_rate_activity()), 100)
                 ))
             }
             return domains_mapping

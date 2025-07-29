@@ -240,19 +240,13 @@ class XMLGeneratorClass:
         if not isinstance(demand, int):
             raise ValueError("demand must be an integer")
         
-        if not self.find_predicate("minimumDemand"):
-            self.add_predicate(
-                name="minimumDemand", 
-                parameters="int demand int " + " int ".join(variables), 
-                functional=boolean_ge(build_recursive(variables), "demand")
-            )
-        
+        variable_params = " ".join([f"{{1 {var}}}" for var in variables])
         self.add_constraint(
             name=constraint_name, 
             arity=len(variables), 
             scope=" ".join(variables),
-            reference="minimumDemand",
-            parameters=f"{demand} {' '.join(variables)}"
+            reference="global:weightedSum",
+            parameters=f"[{variable_params}] __GE_PLACEHOLDER__ {demand}"
         )
 
         return constraint_name
@@ -452,7 +446,7 @@ class XMLGeneratorClass:
             raise ValueError("The factor should be positive")
         if factor >= 1 or factor == 0:
             self.add_constraint(
-                name=f"maximumRateActivity_{cap_variable.split('_')[0]}", 
+                name=f"maximumRateActivity_{cap_variable.replace('_capacity', '')}", 
                 arity=2, 
                 scope=f"{cap_variable} {capActivity_variable}", 
                 reference="maximumRateActivity_mul",
@@ -1117,6 +1111,7 @@ class XMLGeneratorClass:
 
         # Replace placeholders with actual XML tags        
         xml_str = xml_str.replace("__GT_PLACEHOLDER__", "<gt/>")
+        xml_str = xml_str.replace("__GE_PLACEHOLDER__", "<ge/>")
 
         dom = xml.dom.minidom.parseString(xml_str)
         pretty_xml = dom.toprettyxml()
