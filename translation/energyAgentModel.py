@@ -1,31 +1,93 @@
-
 from translation.xmlGenerator import XMLGeneratorClass
+from pyomo.opt import SolverFactory
 from deprecated import deprecated
 import pandas as pd
 import logging
 import os
+import io
+import traceback
 from itertools import product
+from pyomo.environ import *
+import contextlib
+
+
 
 class EnergyAgentClass:
-    def __init__(self, country, logger, data, year_split, demand, xml_file_path):
+    def __init__(self, country, logger, data, year_split, demand):
         self.name = country
         self.logger = logger
         self.data = data
         self.year_split = year_split
         self.demand = demand # Total demand in the country for the year in that time resolution
-        self.demand_constraint = None
-        self.xml_generator = XMLGeneratorClass(logger = self.logger)
+        self.model = None
         self.logger.debug(f"EnergyAgentClass initialized for {country}")
-        self.xml_file_path = xml_file_path
-    
-    def generate_xml(self, domains):
-        
-        self.xml_generator.add_presentation(name=self.name, maximize='False')
-        self.xml_generator.add_agents([self.name])
-        self.xml_generator.add_domains(domains)
+
+    def run(self):
+        self.preprocess_data()
+        self.build_model()
+        return self.solve()
+
+    def solve(self):
+        self.logger.debug(f"Solving model for {self.name}")
+        try:
+            solver = SolverFactory('gurobi')
+
+            # Capture stdout from Gurobi
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                results = solver.solve(self.model, tee=True)  # tee=True prints to redirected stdout
+
+            self.logger.info(f"Solver output for {self.name}:\n{stream.getvalue()}")
+            return self.process_results(results)
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            self.logger.error(f"Solver failed: {e}\n{tb}")
+            raise RuntimeError("Solver failed")
+
+    def build_model(self):
+        def min_capacity_rule(m, k):
+            return m.capacity[k] >= m.min_capacity[k]
+        def max_activity_rule(m, k):
+            return m.rate_activity[k] <= (m.capacity[k] * m.factor[k])
+        def demand_rule(m):
+            return sum(m.rate_activity[k] for k in m.TECHS) >= self.demand
+        def total_cost_rule(m):
+            return sum(
+                (m.capacity[k] - m.min_capacity[k]) * m.capital_cost[k] +
+                m.capacity[k] * m.fixed_cost[k] +
+                m.rate_activity[k] * m.variable_cost[k]
+                for k in m.TECHS
+            )
+        def max_emission_rule(m):
+            pass
+
+        self.logger.debug(f"Building model for {self.name}")
+
+        model = ConcreteModel(name=f"{self.name}_model")
+
+        model.TECHS = Set(initialize=list(self.tech_df.index))
+        model.capacity = Var(model.TECHS, domain=NonNegativeReals)
+        model.rate_activity= Var(model.TECHS, domain=NonNegativeReals)
+
+        model.capital_cost = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'CAPITAL_COST'] / self.tech_df.loc[t, 'OPERATIONAL_LIFETIME'])
+        model.variable_cost = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'VARIABLE_COST'])
+        model.fixed_cost = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'FIXED_COST'] * self.year_split)
+        model.factor = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'FACTOR'])
+        model.min_capacity = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'MIN_INSTALLED_CAPACITY'] if pd.notna(self.tech_df.loc[t, 'MIN_INSTALLED_CAPACITY']) else 0)
+
+        model.MinCapacityConstraint = Constraint(model.TECHS, rule=min_capacity_rule)
+        model.MaxActivityConstraint = Constraint(model.TECHS, rule=max_activity_rule)
+        model.DemandConstraint = Constraint(rule=demand_rule)
+
+        model.TotalCostObjective = Objective(rule=total_cost_rule, sense=minimize)
+
+        self.model = model
+
+    def preprocess_data(self):
+        self.logger.debug(f"Preprocessing data for {self.name}")
         
         self.tech_df = self.data
-        total_technologies = len(self.tech_df)
         self.tech_df['AVAILABILITY_FACTOR'] = self.tech_df['AVAILABILITY_FACTOR'].fillna(0.9)  # Default to 1 if NaN
         self.tech_df['FACTOR'] = self.tech_df['CAPACITY_FACTOR'] * self.tech_df['AVAILABILITY_FACTOR'] * self.tech_df['CAPACITY_TO_ACTIVITY_UNIT'] * self.year_split
         self.tech_df['FACTOR'] = self.tech_df['FACTOR'].fillna(0)  # Replace NaN factors with zero
@@ -35,62 +97,30 @@ class EnergyAgentClass:
             self.tech_df['VARIABLE_COST'].notna() &
             self.tech_df['FIXED_COST'].notna()
         ]
-        
-        #self.tech_df['VARIABLE_COST'] = self.tech_df['VARIABLE_COST'].apply(lambda x: min(x, 999) if pd.notna(x) else x)
-
-        if total_technologies < len(self.tech_df):
-            self.logger.warning(f"Filtered out {total_technologies - len(self.tech_df)} technologies with zero factor or missing costs.")
-            self.logger.warning(f"Remaining technologies used for {self.name} optimization: {len(self.tech_df)}")
-
-        for var in self.tech_df.index:
-            self.xml_generator.add_variable(name=f"{var}_capacity", domain='capacity_domain', agent=self.name)
-            self.xml_generator.add_variable(name=f"{var}_rateActivity", domain='rateActivity_domain', agent=self.name)
-
-        for technology, row in self.tech_df.iterrows():
-            if pd.notna(row['MIN_INSTALLED_CAPACITY']) and round(row['MIN_INSTALLED_CAPACITY']) > 0:
-                self.xml_generator.add_minimum_capacity_constraint(
-                    variable_name=f"{technology}_capacity",
-                    min_capacity=round(row['MIN_INSTALLED_CAPACITY'])
-                )
-            # Assuming $
-            self.xml_generator.add_cost_constraint(
-                variable_capacity_name=f"{technology}_capacity",
-                rateActivity_variable=f"{technology}_rateActivity",
-                previous_installed_capacity=round(row['MIN_INSTALLED_CAPACITY']) if pd.notna(row['MIN_INSTALLED_CAPACITY']) else 0,
-                capital_cost=round((row['CAPITAL_COST']/row['OPERATIONAL_LIFETIME'])/10**3), # convert to thousand currency units
-                variable_cost=round(row['VARIABLE_COST']),
-                fixed_cost=round((row['FIXED_COST'] * self.year_split))  
-            )
-            self.xml_generator.add_maximum_activity_rate_constraint(
-                cap_variable=f"{technology}_capacity",
-                capActivity_variable=f"{technology}_rateActivity",
-                factor=row['FACTOR']*100,
-                div_weight=100,
-            )
-
-        self.demand_constraint = self.xml_generator.add_minimum_demand_constraint(
-            variables = [f"{var}_rateActivity" for var in self.tech_df.index],
-            demand = round(self.demand),
-            extra_name = f"0"
-        )
-
-    def print_xml(self, name):
-        self.logger.debug(f"Printing XML for {self.name}")
-        self.xml_generator.print_xml(output_file=os.path.join(self.xml_file_path, name))
-        self.logger.debug(f"XML generated for {self.name} at {os.path.join(self.xml_file_path, name)}")
-    
-    def change_demand(self, demand_variation_percentage):
-        if self.demand_constraint is not None:
-            self.logger.debug(f"Changing demand for {self.name} by {demand_variation_percentage}%")
-            self.xml_generator.remove_constraint(self.demand_constraint)
-
-            new_demand = round(self.demand * (1 + demand_variation_percentage))
-
-            # Add the updated demand constraint
-            self.demand_constraint = self.xml_generator.add_minimum_demand_constraint(
-                variables=[f"{var}_rateActivity" for var in self.tech_df.index],
-                demand=new_demand,
-                extra_name=f"{demand_variation_percentage}"
-            )
+    def process_results(self, results):
+        self.logger.debug(f"Processing results for {self.name}")
+        if results.solver.termination_condition == TerminationCondition.optimal:
+            self.logger.info(f"Optimal solution found for {self.name}")
+            solution = {
+                'technology': list(self.model.TECHS),
+                'capacity': [value(self.model.capacity[k]) for k in self.model.TECHS],
+                'rate_activity': [value(self.model.rate_activity[k]) for k in self.model.TECHS],
+                'capital_cost': [value(self.model.capital_cost[k]) for k in self.model.TECHS],
+                'variable_cost': [value(self.model.variable_cost[k]) for k in self.model.TECHS],
+                'fixed_cost': [value(self.model.fixed_cost[k]) for k in self.model.TECHS],
+                'factor': [value(self.model.factor[k]) for k in self.model.TECHS],
+                'min_capacity': [value(self.model.min_capacity[k]) for k in self.model.TECHS]
+            }
+            df = pd.DataFrame(solution)
+            df['country'] = self.name
+            return value(self.model.TotalCostObjective), self.demand, df
         else:
-            raise NotImplementedError("XML instance missing")
+            self.logger.error(f"No optimal solution found for {self.name}")
+            raise RuntimeError("No optimal solution found")
+        
+    def change_demand(self, demand_variation_percentage):
+        if self.model is not None:
+            self.logger.debug(f"Changing demand for {self.name} by {demand_variation_percentage}%")
+
+            self.demand = self.demand * (1 + demand_variation_percentage)
+            self.build_model()
