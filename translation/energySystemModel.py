@@ -3,7 +3,7 @@ from translation.parsers.osemosysDataParser import osemosysDataParserClass
 from translation.xmlGenerator import XMLGeneratorClass
 from translation.energyAgentModel import EnergyAgentClass
 from translation.transmissionModel import TransmissionModelClass
-from translation.xmlEnergyReader import xmlEnergyReader
+from translation.energyReader import EnergyReader
 from translation.worker import ThreadManager
 from deprecated import deprecated
 import pandas as pd
@@ -133,7 +133,7 @@ class EnergyModelClass:
     def prepare_reader(self, k, t, year):
         self.logger.debug(f"Preparing XML reader for iteration {k}, time {t}, year {year}")
 
-        return xmlEnergyReader(
+        return EnergyReader(
             k=k,
             t=t,
             year=year,

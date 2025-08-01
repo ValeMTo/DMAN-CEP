@@ -6,7 +6,7 @@ import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-class xmlEnergyReader():
+class EnergyReader():
     def __init__(self, k, t, year, countries, delta):
 
         self.k = k
@@ -163,7 +163,7 @@ class xmlEnergyReader():
             transmission_data = transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
             self.transmission_df = transmission_data
 
-        file_path = os.path.join(folder, f"xmlEnergyReader_{self.k}_{self.t}_{self.year}.pkl")
+        file_path = os.path.join(folder, f"energyReader_{self.k}_{self.t}_{self.year}.pkl")
         with open(file_path, 'wb') as f:
             pickle.dump({
                 'k': self.k,
