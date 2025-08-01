@@ -22,6 +22,15 @@ class EnergyModelClass:
         self.config_parser = ConfigParserClass(file_path='config.yaml')
         self.logger = self.create_logger(*self.config_parser.get_log_info())
         self.config_parser.set_logger(self.logger)
+
+        base_output_path = self.config_parser.get_output_file_path()
+        output_path = base_output_path
+        k = 1
+        while os.path.exists(output_path):
+            output_path = f"{base_output_path}+{k}"
+            k += 1
+        self.config_parser.set_output_file_path(output_path)
+
         self.countries = self.config_parser.get_countries()
         self.name = self.config_parser.get_problem_name()
         self.time_resolution = self.config_parser.get_annual_time_resolution()
@@ -48,6 +57,7 @@ class EnergyModelClass:
         self.max_iteration = self.config_parser.get_max_iteration()
         self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
         self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
+
 
     def create_logger(self, log_level, log_file):
         log_dir = os.path.dirname(log_file)
@@ -80,14 +90,16 @@ class EnergyModelClass:
         while i < len(self.years):
             year = self.years[i]
             self.thread_manager.wait_for(f'data_parser_load_{year}')
-            self.data_parser.add_previous_installed_capacity(year, self.results_df)
+            self.data_parser.add_previous_installed_capacity(self.years[i-1], self.results_df)
             if i + 1 < len(self.years):
+                new_data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
                 self.thread_manager.run_parallel(
                     name=f'data_parser_load_{self.years[i+1]}',
-                    func=self.data_parser.load_data,
+                    func=new_data_parser.load_data,
                     args=(self.years[i+1], self.countries)
                 )
             self.solve_year(year)
+            self.data_parser = new_data_parser
             i += 1
 
         self.logger.info("Energy model solved")
@@ -100,7 +112,7 @@ class EnergyModelClass:
             self.extract_data(year, t)
             for k in tqdm(range(self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
                 self.reader = self.prepare_reader(k=k, t=t, year=year)
-                marginal_costs_df = self.solve_internal_DCOP(t, year)
+                marginal_costs_df = self.solve_internal_problem(t, year)
                 if self.check_convergence(marginal_costs_df):
                     self.logger.info(f"Convergence reached for time {t} and year {year} after {k} iterations")
                     self.solve_transmission_problem(t, year)
@@ -126,59 +138,29 @@ class EnergyModelClass:
             t=t,
             year=year,
             countries=self.countries,
+            delta=self.delta_marginal_cost
         )
 
-    def solve_internal_DCOP(self, t, year):
+    def solve_internal_problem(self, t, year):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
 
         if not os.path.exists(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems")):
             os.makedirs(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems"))
 
-        threads = []
         for country in self.countries:
-            thread = Thread(target=self.create_internal_DCOP, args=(country, t, year))
-            threads.append(thread)
-            thread.start()
-        for thread in threads:
-            thread.join()
-        countries_check, output_folder_path = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal"))
-        marginal_costs_df = self.calculate_marginal_costs(t, year, output_folder_path, countries_check)
+            self.solve_country_optimization(country, t)
 
+        marginal_costs_df = self.calculate_marginal_costs(t, year)
         self.logger.info(f"Marginal costs calculated for time {t} and year {year}")
         return marginal_costs_df
     
-    def calculate_marginal_costs(self, t, year, output_folder_path, countries_check):
-        self.logger.info(f"Calculating marginal costs for time {t} and year {year} at {output_folder_path}")
-        data = {
-            country: {
-            f"-{self.delta_marginal_cost}": None,
-            "0": None,
-            f"+{self.delta_marginal_cost}": None,
-            }
-            for country in self.countries
-        }
+    def calculate_marginal_costs(self, t, year):
+        self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
 
-        output_df = self.reader.get_internal_outputs()
-        output_df = output_df.merge(self.data, left_on='technology', right_on='TECHNOLOGY', how='left')
+        self.reader.calculate_marginal_costs()
+        output_df = self.reader.get_total_cost_table()
 
-        output_df['total_cost'] = (
-            output_df['capacity'] * (output_df['CAPITAL_COST'] - output_df['MIN_INSTALLED_CAPACITY']) +
-            output_df['rateActivity'] * output_df['VARIABLE_COST'] +
-            output_df['FIXED_COST'] * output_df['year_split']
-        )
-
-        agg = output_df.groupby(['country', 'demand_type'], as_index=False)['total_cost'].sum()
-        pivot = agg.pivot(index='country', columns='demand_type', values='total_cost').fillna(0)
-
-        pivot['marginal_demand'] = [self.demand_map[t][c]['marginal_demand'] for c in pivot.index]
-
-        pivot['MC_import'] = (pivot["0"] - pivot[f"-{self.delta_marginal_cost}"]) / pivot['marginal_demand']
-        pivot['MC_export'] = (pivot[f"+{self.delta_marginal_cost}"] - pivot["0"]) / pivot['marginal_demand']
-        pivot[['MC_import', 'MC_export']] = pivot[['MC_import', 'MC_export']].clip(lower=0)
-
-        self.reader.set_general_picture(pivot)
-
-        return pivot
+        return output_df
 
     def solve_transmission_problem(self, time, year):
         self.logger.info(f"Solving transmission problem for time {time}")
@@ -251,23 +233,26 @@ class EnergyModelClass:
         if self.results_df is None:
             self.results_df = self.data[['TECHNOLOGY', 'MIN_INSTALLED_CAPACITY']].copy()
             self.results_df.rename(columns={'MIN_INSTALLED_CAPACITY': 'baseline'}, inplace=True)
+
+        if f'capacity_{year}' not in self.results_df.columns:
+            self.results_df = self.results_df.merge(
+                outputs_df, 
+                left_on='TECHNOLOGY',
+                right_on='technology',
+                how='left'
+            )
+            self.results_df.rename(columns={'capacity': f'capacity_{year}'}, inplace=True)
         else:
-            if f'capacity_{year}' not in self.results_df.columns:
-                self.results_df = self.results_df.merge(
-                    outputs_df, 
-                    left_on='TECHNOLOGY',
-                    right_on='technology',
-                    how='left'
-                )
-                self.results_df.rename(columns={'capacity': f'capacity_{year}'}, inplace=True)
-            else:
-                merged_df = self.results_df.merge(
-                    outputs_df, 
-                    left_on='TECHNOLOGY',
-                    right_on='technology',
-                    how='left'
-                )
-                self.results_df[f'capacity_{year}'] = merged_df[[f'capacity_{year}', 'capacity']].max(axis=1)
+            merged_df = self.results_df.merge(
+                outputs_df, 
+                left_on='TECHNOLOGY',
+                right_on='technology',
+                how='left'
+            )
+            self.results_df[f'capacity_{year}'] = merged_df[[f'capacity_{year}', 'capacity']].max(axis=1)
+            self.results_df.drop(columns=['capacity'], inplace=True, errors='ignore')
+        self.results_df.drop(columns=['technology'], inplace=True, errors='ignore')
+        self.results_df['COUNTRY'] = self.results_df['TECHNOLOGY'].apply(lambda x: x[:2])
 
         if self.config_parser.get_expansion_enabled():
             raise NotImplementedError("Expansion is not implemented yet.")
@@ -289,8 +274,7 @@ class EnergyModelClass:
         self.data['TECHNOLOGY'] = self.data.index
         self.data.reset_index(drop=True, inplace=True)
 
-    def create_internal_DCOP(self, country, time, year):
-        self.logger.debug(f"Creating internal DCOP for {country} at time {time} and year {year}")
+    def solve_country_optimization(self, country, time):
 
         energy_country_class = EnergyAgentClass(
             country=country,
@@ -298,22 +282,18 @@ class EnergyModelClass:
             data=self.country_data_per_time[country],
             year_split=self.demand_map[time]['year_split'],
             demand=self.demand_map[time][country]['demand'],
-            xml_file_path=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/internal/problems")
         )
-        energy_country_class.generate_xml(
-            domains=self.create_domains(country=country, time=time, problem_type='internal')
-        )
-        energy_country_class.print_xml(f"{country}_0.xml")
+        self.reader.store(*energy_country_class.run(), demand_type='0', country=country)
         energy_country_class.change_demand(demand_variation_percentage=self.delta_marginal_cost)
-        energy_country_class.print_xml(f"{country}_+{self.delta_marginal_cost}.xml")
+        self.reader.store(*energy_country_class.solve(), demand_type=f"+", country=country)
         energy_country_class.change_demand(demand_variation_percentage=-self.delta_marginal_cost)
-        energy_country_class.print_xml(f"{country}_-{self.delta_marginal_cost}.xml")
+        self.reader.store(*energy_country_class.solve(), demand_type=f"-", country=country)
 
     def solve_DCOP(self, input_path, output_path):
         self.logger.debug(f"Solving DCOP for {input_path} and saving to {output_path}")
         java_command = [
             'java', 
-            '-Xmx2G', 
+            '-Xmx4G', 
             '-ea',
             '-cp', 
             'frodo2.19.jar:jdom2-2.0.6.jar:jacop-4.7.0.jar', 
@@ -321,7 +301,7 @@ class EnergyModelClass:
             '-timeout', 
             str(self.config_parser.get_timeout_time_steps()*1000), 
             input_path, 
-            'agents/DPOP/DPOPagentJaCoP.xml', 
+            'agents/MaxSum/MaxSumagentJaCoP.xml', 
             '-o', 
             output_path,
         ]
@@ -361,10 +341,9 @@ class EnergyModelClass:
                 future.result()  # Wait for each thread to complete
 
         if 'transmission' in folder:
-            return self.reader.load(type='transmission', output_folder_path=output_folder)
+            return self.reader.load(output_folder_path=output_folder)
         
-        countries_check = self.reader.load(type='internal', output_folder_path=output_folder)
-        return countries_check, output_folder
+        return output_folder
     
     def create_domains(self, country, time, problem_type='internal'):
         self.logger.debug(f"Creating domains for {problem_type} problem in the model")
