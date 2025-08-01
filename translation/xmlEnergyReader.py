@@ -2,34 +2,52 @@ import os
 import xml.etree.ElementTree as ET
 import pandas as pd
 import pickle
+import warnings
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class xmlEnergyReader():
-    def __init__(self, k, t, year, countries):
+    def __init__(self, k, t, year, countries, delta):
 
         self.k = k
         self.t = t
         self.year = year
+        self.delta = delta  # Delta for marginal cost calculation
 
         self.countries_check = {}
         self.countries = countries
 
-        self.df = pd.DataFrame()
-        self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rateActivity'])
+        self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'MC_import', 'MC_export'], index=countries)
+        self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rate_activity', 'capital_cost', 'variable_cost', 'fixed_cost', 'factor', 'min_capacity'])
 
         self.transmission_df = pd.DataFrame(columns=['start_country', 'end_country', 'exchange'])
 
 
-    def load(self, type='internal', output_folder_path=None):
+    def load(self, output_folder_path=None):
         if output_folder_path is None:
             raise ValueError("output_folder_path must be provided")
         self.output_folder_path = output_folder_path
 
-        if type == 'internal':
-            return self.load_internal()
-        elif type == 'transmission':
-            return self.load_transmission()
-        else:
-            raise ValueError(f"Unsupported type: {type}")
+        return self.load_transmission()
+
+    def get_total_cost_table(self):
+        return self.df.copy()
+    
+    def calculate_marginal_costs(self):
+        self.df['MC_import'] = (self.df["0"] - self.df[f"-"]) / self.df['marginal_demand']
+        self.df['MC_export'] = (self.df[f"+"] - self.df["0"]) / self.df['marginal_demand']
+        self.df[['MC_import', 'MC_export']] = self.df[['MC_import', 'MC_export']].clip(lower=0)
+    
+    def store(self, total_cost, demand, df, demand_type, country):
+        self.df.loc[country, demand_type] = total_cost
+        self.df.loc[country, f'demand_{demand_type}'] = demand
+        if demand_type == '0':
+            self.df.loc[country, 'marginal_demand'] = demand * self.delta
+
+        df['demand_type'] = demand_type
+        if not df.empty and not df.isna().all(axis=None):
+            df = df.reindex(columns=self.tech_df.columns, fill_value=None)
+            self.tech_df = pd.concat([self.tech_df, df], ignore_index=True)
 
     def load_internal(self):
         self.countries_check = {country: {'-': -1, '+': -1, '0': -1} for country in self.countries}
@@ -97,6 +115,8 @@ class xmlEnergyReader():
         
 
     def load_transmission(self):
+        if not os.listdir(self.output_folder_path):
+            raise ValueError(f"The folder '{self.output_folder_path}' is empty. No XML files to process.")
         for file_name in os.listdir(self.output_folder_path):
             if file_name.endswith("_output.xml"):
                 file_path = os.path.join(self.output_folder_path, file_name)
@@ -104,6 +124,8 @@ class xmlEnergyReader():
                 root = tree.getroot()
 
                 if "valuation" in root.attrib:
+                    if root.attrib["valuation"] == "infinity":
+                        raise ValueError(f"File {file_name} has an 'infinity' valuation. UNFEASIBLE")
 
                     rows = []
                     for assignment in root.findall("assignment"):
@@ -130,9 +152,10 @@ class xmlEnergyReader():
         return self.transmission_df.copy()
     
     def set_general_picture(self, df):
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError("Input must be a pandas DataFrame")
-        self.df = df
+        # if not isinstance(df, pd.DataFrame):
+        #     raise ValueError("Input must be a pandas DataFrame")
+        # self.df = df
+        raise NotImplementedError("This method is not implemented yet. Please implement it according to your requirements.")
 
     def save(self, folder, transmission_data):
         if not transmission_data.empty:
@@ -145,7 +168,6 @@ class xmlEnergyReader():
                 'k': self.k,
                 't': self.t,
                 'year': self.year,
-                'countries_check': self.countries_check,
                 'df': self.df,
                 'tech_df': self.tech_df,
                 'transmission_df': self.transmission_df
