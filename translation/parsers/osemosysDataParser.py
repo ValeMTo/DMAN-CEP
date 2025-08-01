@@ -86,11 +86,11 @@ class osemosysDataParserClass(dataParserClass):
 
         self.logger.debug("Data loaded successfully for year %s", year)
 
-    def add_previous_installed_capacity(self, year, new_installable_capacity_df=None):
+    def add_previous_installed_capacity(self, previous_year, new_installable_capacity_df=None):
         if new_installable_capacity_df is not None:
-            self.merged_df = self.merged_df.merge(new_installable_capacity_df[['COUNTRY', 'TECHNOLOGY', f'capacity_{year-1}']], on=['COUNTRY', 'TECHNOLOGY'], how='left')
-            self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacit_{year-1}'].fillna(0)
-            self.merged_df.drop(columns=[f'capacity_{year-1}'], inplace=True)
+            self.merged_df = self.merged_df.merge(new_installable_capacity_df[['COUNTRY', 'TECHNOLOGY', f'capacity_{previous_year}']], on=['COUNTRY', 'TECHNOLOGY'], how='left')
+            self.merged_df['MIN_INSTALLED_CAPACITY'] = self.merged_df[f'capacity_{previous_year}'].fillna(0)
+            self.merged_df.drop(columns=[f'capacity_{previous_year}'], inplace=True)
     
     def get_technologies(self):
         self.logger.debug("Getting technologies")
