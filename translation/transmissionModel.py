@@ -22,10 +22,11 @@ class TransmissionModelClass:
 
         self.xml_generator.add_presentation(name="TransmissionModel", maximize='False')
         self.xml_generator.add_agents(self.countries)
-        self.xml_generator.add_domains(self.generate_domains())
+        domains = self.generate_domains()
+        self.xml_generator.add_domains(domains)
 
         for idx, row in self.data.iterrows():
-            self.xml_generator.add_variable(name=f"transmission_{row['start_country']}_{row['end_country']}", domain='capacity_domain', agent=row['start_country'])
+            self.xml_generator.add_variable(name=f"transmission_{row['start_country']}_{row['end_country']}", domain=f"{row['start_country']}_domain", agent=row['start_country'])
         
         already_inside = {}
         for idx, row in self.data.iterrows():   
@@ -37,14 +38,16 @@ class TransmissionModelClass:
                 )
                 already_inside[f"{row['start_country']}_{row['end_country']}"] = True
 
-        # Constraint: Power balance per country
         for country in self.countries:
+            # Constraint: Power balance per country
             transmission_variables = [f"transmission_{row['start_country']}_{row['end_country']}" for idx, row in self.data.iterrows() if row['start_country'] == country]
+            marginal_demand=max(round(self.delta_demand_map[country]['marginal_demand']), 0)
             self.xml_generator.add_power_balance_constraint(
                 extra_name = f"{country}",
                 flow_variables = transmission_variables,
-                delta=round(self.delta_demand_map[country]['marginal_demand'])
+                delta=marginal_demand,
             )
+            # Soft constraint: Utility function for transmission costs
             self.xml_generator.add_utility_function_constaint(
                 extra_name=f"{country}",
                 variables= transmission_variables,
@@ -53,31 +56,32 @@ class TransmissionModelClass:
                 cost = round(self.cost_transmission_line),
             )
 
-
         # Constraint: Transmission capacity should be less than or equal to the maximum capacity
         for idx, row in self.data.iterrows():
+            marginal_demand=max(round(self.delta_demand_map[row['start_country']]['marginal_demand']), 0)
             self.xml_generator.add_maximum_capacity_constraint(
                 variable_name=f"transmission_{row['start_country']}_{row['end_country']}",
-                max_capacity=round(row['capacity']*0.7),
+                max_capacity=min(round(row['capacity']*0.7), marginal_demand),
             )
 
     def reduce_marginal_cost_magnitude(self, df):
         self.logger.debug("Reducing marginal cost magnitude")
         df = df.copy()
         max_value = max(abs(df['MC_import']).max(), abs(df['MC_export']).max())
-        df['MC_import'] = (df['MC_import'] / max_value * 1000).round().astype(int)
-        df['MC_export'] = (df['MC_export'] / max_value * 1000).round().astype(int)
+        df['MC_import'] = pd.to_numeric((df['MC_import'] / max_value * 500)).round().astype(int)
+        df['MC_export'] = pd.to_numeric((df['MC_export'] / max_value * 500)).round().astype(int)
         return df
     
     def generate_domains(self):
         self.logger.debug("Generating domains for transmission model")
-        max_domain = round(max(self.delta_demand_map[country]['marginal_demand'] for country in self.countries) * 1.25)
-        positive_domain = range(0, max_domain, round((max_domain * 2) // 100))
-        negative_domain = [ -var for var in positive_domain]
-
-        domain_values = set(negative_domain + list(positive_domain))
-        domain_values.add(0)
-        domains = { 'capacity_domain': sorted(domain_values) }
+        domains = {}
+        for country in self.countries:
+            max_domain = round(self.delta_demand_map[country]['marginal_demand'])
+            positive_domain = range(0, max_domain, 50)
+            negative_domain = [ -var for var in positive_domain]
+            domain_values = set(negative_domain + list(positive_domain))
+            domain_values.add(0)
+            domains[f"{country}_domain"] =  sorted(domain_values)
         return domains
 
     
