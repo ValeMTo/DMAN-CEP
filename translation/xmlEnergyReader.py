@@ -17,7 +17,7 @@ class xmlEnergyReader():
         self.countries_check = {}
         self.countries = countries
 
-        self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'MC_import', 'MC_export'], index=countries)
+        self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'cost_per_unit', 'MC_import', 'MC_export'], index=countries)
         self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rate_activity', 'capital_cost', 'variable_cost', 'fixed_cost', 'factor', 'min_capacity'])
 
         self.transmission_df = pd.DataFrame(columns=['start_country', 'end_country', 'exchange'])
@@ -43,6 +43,7 @@ class xmlEnergyReader():
         self.df.loc[country, f'demand_{demand_type}'] = demand
         if demand_type == '0':
             self.df.loc[country, 'marginal_demand'] = demand * self.delta
+            self.df.loc[country, 'cost_per_unit'] = total_cost / demand if demand > 0 else 0
 
         df['demand_type'] = demand_type
         if not df.empty and not df.isna().all(axis=None):
