@@ -18,6 +18,14 @@ class ConfigParserClass:
     def get_output_file_path(self):
         return self.config['output_file_path']
     
+    def set_output_file_path(self, path):
+        """
+        Sets the output folder path in the configuration.
+        :param path: str
+        """
+        self.config['output_file_path'] = path
+        self.logger.info(f"Output folder path set to {path}")
+    
     def get_problem_name(self):
         return self.config['name']
     
