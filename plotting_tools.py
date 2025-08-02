@@ -1,13 +1,123 @@
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import numpy as np
 import plotly.express as px
 import plotly.colors
+
+def plot_demand_mc_marginals(data_dict, width=1600, height=900):
+    """
+    Plot demand (-, 0, +), marginal demand, MC_import, and MC_export per country over iterations.
+    """
+    records = []
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(data_dict.keys(), key=try_int)
+    for k in iterations:
+        df = data_dict[k]['df']
+        if 'MC_import' in df.columns:
+            df['MC_import'] = pd.to_numeric(df['MC_import'], errors='coerce')
+        if 'MC_export' in df.columns:
+            df['MC_export'] = pd.to_numeric(df['MC_export'], errors='coerce')
+        for country in df.index:
+            record = {
+                'Iteration': try_int(k),
+                'Country': country,
+                'Demand_-': df.at[country, 'demand_-'] if 'demand_-' in df.columns else None,
+                'Demand_0': df.at[country, 'demand_0'] if 'demand_0' in df.columns else None,
+                'Demand_+': df.at[country, 'demand_+'] if 'demand_+' in df.columns else None,
+                'MarginalDemand': df.at[country, 'marginal_demand'] if 'marginal_demand' in df.columns else None,
+                'MC_import': df.at[country, 'MC_import'] if 'MC_import' in df.columns else None,
+                'MC_export': df.at[country, 'MC_export'] if 'MC_export' in df.columns else None,
+            }
+            records.append(record)
+
+    df_all = pd.DataFrame(records)
+    df_all = df_all.sort_values('Iteration')
+    countries = df_all['Country'].unique()
+    cols = 4
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=False,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{"secondary_y": True} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_all[df_all['Country'] == country]
+
+        # Demand lines
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['Demand_-'],
+            mode='lines+markers', name='Demand -',
+            legendgroup='Demand -', showlegend=(i == 0),
+            line=dict(color='blue', dash='dot')
+        ), row=row, col=col, secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['Demand_0'],
+            mode='lines+markers', name='Demand 0',
+            legendgroup='Demand 0', showlegend=(i == 0),
+            line=dict(color='blue', dash='solid')
+        ), row=row, col=col, secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['Demand_+'],
+            mode='lines+markers', name='Demand +',
+            legendgroup='Demand +', showlegend=(i == 0),
+            line=dict(color='blue', dash='dash')
+        ), row=row, col=col, secondary_y=False)
+
+        # Marginal Demand
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['MarginalDemand'],
+            mode='lines+markers', name='Marginal Demand',
+            legendgroup='Marginal Demand', showlegend=(i == 0),
+            line=dict(color='green')
+        ), row=row, col=col, secondary_y=True)
+
+        # MC_import
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['MC_import'],
+            mode='lines+markers', name='MC Import',
+            legendgroup='MC Import', showlegend=(i == 0),
+            line=dict(color='orange', dash='dot')
+        ), row=row, col=col, secondary_y=True)
+
+        # MC_export
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['MC_export'],
+            mode='lines+markers', name='MC Export',
+            legendgroup='MC Export', showlegend=(i == 0),
+            line=dict(color='red', dash='dot')
+        ), row=row, col=col, secondary_y=True)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Demand (-, 0, +), Marginal Demand, MC Import/Export per Country",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
+    )
+    fig.update_yaxes(title_text="Demand", secondary_y=False)
+    fig.update_yaxes(title_text="Marginal / MC", secondary_y=True)
+    fig.show()
 
 def plot_cost_demand_facets(data_dict, width=1600, height=900):
     # Prepare records from the nested dictionary
     records = []
-    iterations = sorted(data_dict.keys())
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(data_dict.keys(), key=try_int)
     for k in iterations:
         df = data_dict[k]['df']
         for country in df.index:
@@ -16,7 +126,7 @@ def plot_cost_demand_facets(data_dict, width=1600, height=900):
                 demand_col = f'demand_{scenario}'
                 demand = df.at[country, demand_col] if demand_col in df.columns else None
                 records.append({
-                    'Iteration': k,
+                    'Iteration': try_int(k),
                     'Country': country,
                     'Scenario': scenario,
                     'Cost': cost,
@@ -75,7 +185,15 @@ def plot_cost_demand_facets(data_dict, width=1600, height=900):
     fig.show()
 
 def plot_demand_transmission(data, width=1200, height=900):
-    iterations = sorted(data.keys())
+
+    # Sort iterations numerically if possible
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(data.keys(), key=try_int)
     records = []
 
     for k in iterations:
@@ -89,15 +207,19 @@ def plot_demand_transmission(data, width=1200, height=900):
             imports = imports if not pd.isna(imports) else 0.0
             exports = exports if not pd.isna(exports) else 0.0
             export_within_demand = min(exports, demand)
+            cost = df.at[country, '0'] if '0' in df.columns else None
+            cost_per_unit = cost / demand if demand and cost is not None else None
             records.append({
-                'Iteration': k,
+                'Iteration': try_int(k),
                 'Country': country,
                 'Demand': demand,
                 'Import': imports,
-                'Export': export_within_demand
+                'Export': export_within_demand,
+                'CostPerUnit': cost_per_unit
             })
 
     df_tx = pd.DataFrame(records)
+    df_tx = df_tx.sort_values('Iteration')
     countries = df_tx['Country'].unique()
     cols = 4
     rows = (len(countries) + cols - 1) // cols
@@ -106,7 +228,8 @@ def plot_demand_transmission(data, width=1200, height=900):
         rows=rows, cols=cols,
         subplot_titles=countries,
         shared_xaxes=False, shared_yaxes=False,
-        vertical_spacing=0.12, horizontal_spacing=0.05
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{"secondary_y": True} for _ in range(cols)] for _ in range(rows)]
     )
 
     for i, country in enumerate(countries):
@@ -119,7 +242,7 @@ def plot_demand_transmission(data, width=1200, height=900):
             name='Internal Demand',
             marker_color='blue', showlegend=(i == 0),
             offsetgroup='demand', legendgroup='Demand'
-        ), row=row, col=col)
+        ), row=row, col=col, secondary_y=False)
 
         fig.add_trace(go.Bar(
             x=subset['Iteration'], y=subset['Export'],
@@ -127,7 +250,7 @@ def plot_demand_transmission(data, width=1200, height=900):
             marker=dict(color='blue', pattern=dict(shape='\\')),
             offsetgroup='demand', base=0,
             showlegend=(i == 0), legendgroup='Export'
-        ), row=row, col=col)
+        ), row=row, col=col, secondary_y=False)
 
         fig.add_trace(go.Bar(
             x=subset['Iteration'], y=subset['Import'],
@@ -135,15 +258,23 @@ def plot_demand_transmission(data, width=1200, height=900):
             marker_color='green', opacity=0.8,
             offsetgroup='import', base=subset['Demand'],
             showlegend=(i == 0), legendgroup='Import'
-        ), row=row, col=col)
+        ), row=row, col=col, secondary_y=False)
+
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['CostPerUnit'],
+            mode='lines+markers', name='Cost per Unit',
+            line=dict(color='red', dash='solid'),
+            showlegend=(i == 0), legendgroup='CostPerUnit'
+        ), row=row, col=col, secondary_y=True)
 
     fig.update_layout(
         height=height, width=width,
-        title_text=f"Demand + Transmission (Patterned Export) per Country ",
+        title_text=f"Demand + Transmission (Patterned Export) per Country with Cost per Unit",
         barmode='overlay',
         legend=dict(orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5)
     )
-    fig.update_yaxes(title_text="Energy")
+    fig.update_yaxes(title_text="Energy", secondary_y=False)
+    fig.update_yaxes(title_text="Cost per Unit", secondary_y=True)
     fig.show()
 
 def analyze_transmission_symmetry(width, height, timeslice_data, title_prefix="Transmission Flow"):
@@ -160,7 +291,13 @@ def analyze_transmission_symmetry(width, height, timeslice_data, title_prefix="T
     - fig (plotly.graph_objs._figure.Figure): The generated plotly figure
     - df_mismatches (pd.DataFrame or None): DataFrame of symmetry mismatches (or None if all OK)
     """
-    iterations = sorted(timeslice_data.keys())
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(timeslice_data.keys(), key=try_int)
     mismatches = []
     records = []
 
@@ -194,7 +331,7 @@ def analyze_transmission_symmetry(width, height, timeslice_data, title_prefix="T
         # Collect data for plotting
         for (start, end), value in flow_map.items():
             records.append({
-                'Iteration': k,
+                'Iteration': try_int(k),
                 'Start': start,
                 'End': end,
                 'Exchange': value
@@ -231,13 +368,23 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
     - height: plot height in px
     """
     records = []
-    iterations = sorted(data_dict.keys())
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(data_dict.keys(), key=try_int)
     
     for k in iterations:
         df = data_dict[k]['df']
+        if 'MC_import' in df.columns:
+            df['MC_import'] = pd.to_numeric(df['MC_import'], errors='coerce').round(0)
+        if 'MC_export' in df.columns:
+            df['MC_export'] = pd.to_numeric(df['MC_export'], errors='coerce').round(0)
         for country in df.index:
             record = {
-                'Iteration': k,
+                'Iteration': try_int(k),
                 'Country': country,
                 'Cost': df.loc[country, '0'] if '0' in df.columns else None,
                 'MC_import': df.loc[country, 'MC_import'] if 'MC_import' in df.columns else None,
@@ -247,6 +394,7 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
             records.append(record)
     
     df_all = pd.DataFrame(records)
+    df_all = df_all.sort_values('Iteration')
     countries = df_all['Country'].unique()
     cols = 4
     rows = (len(countries) + cols - 1) // cols
