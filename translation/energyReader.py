@@ -20,8 +20,7 @@ class EnergyReader():
         self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'cost_per_unit', 'MC_import', 'MC_export'], index=countries)
         self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rate_activity', 'capital_cost', 'variable_cost', 'fixed_cost', 'factor', 'min_capacity'])
 
-        self.transmission_df = pd.DataFrame(columns=['start_country', 'end_country', 'exchange'])
-
+        self.transmission_df = None
 
     def load(self, output_folder_path=None):
         if output_folder_path is None:
@@ -146,9 +145,14 @@ class EnergyReader():
         if self.tech_df.empty:
             raise ValueError("No internal outputs available. Please load the internal data first.")
         return self.tech_df.copy()
+    
+    def set_transmission_outputs(self, transmission_data):
+        if not isinstance(transmission_data, pd.DataFrame):
+            raise ValueError("transmission_data must be a pandas DataFrame")
+        self.transmission_df = transmission_data
 
     def get_transmission_outputs(self):
-        if self.transmission_df.empty:
+        if self.transmission_df is None:
             raise ValueError("No transmission outputs available. Please load the transmission data first.")  
         return self.transmission_df.copy()
     

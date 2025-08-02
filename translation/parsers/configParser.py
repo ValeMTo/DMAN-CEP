@@ -51,7 +51,15 @@ class ConfigParserClass:
         """
         self.logger.debug("Max iteration set in config parser")
         return self.config['outline']['max_iterations']
-    
+
+    def get_min_convergence_iterations(self):
+        """
+        Returns the minimum number of convergence iterations for the model.
+        :return: int
+        """
+        self.logger.debug("Min convergence iterations set in config parser")
+        return self.config['outline']['min_convergence_iterations']
+
     def get_delta_marginal_cost(self):
         """
         Returns the delta for calculating the marginal cost for the model.

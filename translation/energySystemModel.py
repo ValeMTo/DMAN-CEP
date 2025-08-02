@@ -58,6 +58,8 @@ class EnergyModelClass:
         self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
         self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
 
+        self.convergence_iteration = 0
+
 
     def create_logger(self, log_level, log_file):
         log_dir = os.path.dirname(log_file)
@@ -167,7 +169,7 @@ class EnergyModelClass:
 
         transmission_solver = TransmissionModelClass(
             countries=self.countries,
-            data=self.transmission_data_max_capacity,
+            data=self.transmission_data_max_capacity.copy(),
             delta_demand_map=self.demand_map[time],
             marginal_costs_df=self.marginal_costs_df[['MC_import', 'MC_export']],
             cost_transmission_line=self.config_parser.get_cost_transmission_line(),
@@ -176,12 +178,7 @@ class EnergyModelClass:
             expansion_enabled=self.config_parser.get_expansion_enabled(),
         )
 
-        transmission_solver.generate_xml()
-        transmission_solver.print_xml(
-            name=f"transmission_problem_{time}.xml",
-        )
-
-        output_folder = self.solve_folder(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission"))
+        self.reader.set_transmission_outputs(transmission_solver.solve())
         self.update_demand(time)
         self.logger.debug(f"Transmission problem solved for time {time}")
 
@@ -194,7 +191,14 @@ class EnergyModelClass:
         self.logger.debug(f"Maximum Distance between marginal costs: {distance}")
         if distance < self.marginal_cost_tolerance:
             self.logger.info(f"Convergence reached with distance {distance} < tolerance {self.marginal_cost_tolerance}")
-            return True
+            if self.convergence_iteration < self.config_parser.get_min_convergence_iterations():
+                self.convergence_iteration += 1
+                self.marginal_costs_df = marginal_costs_df
+                return False
+            else:
+                self.convergence_iteration = 0
+                return True
+        self.convergence_iteration = 0
         self.marginal_costs_df = marginal_costs_df
         return False
     
@@ -202,25 +206,28 @@ class EnergyModelClass:
         self.logger.info("Updating demand based on transmission problem results")
 
         transmission_outputs = self.reader.get_transmission_outputs()
-        for start_country, exchange in transmission_outputs.groupby('start_country')['exchange'].sum().items():
-            self.demand_map[time][start_country]['demand'] += exchange
+        if not transmission_outputs.empty:
+            for start_country, exchange in transmission_outputs.groupby('start_country')['exchange'].sum().items():
+                self.demand_map[time][start_country]['demand'] += exchange
 
         for c in self.countries:    
             self.demand_map[time][c]['marginal_demand'] = self.demand_map[time][c]['demand'] * self.delta_marginal_cost
 
-        for start_country, end_country, exchange in transmission_outputs.itertuples(index=False):
-            if start_country != end_country:
-                self.transmission_data_max_capacity.loc[
-                    (self.transmission_data_max_capacity['start_country'] == start_country) & 
-                    (self.transmission_data_max_capacity['end_country'] == end_country), 
-                    'capacity'
-                ] -= abs(exchange)
-        if self.transmission_data.empty:
-            self.transmission_data = self.reader.get_transmission_outputs()
+        if not transmission_outputs.empty:
+            for start_country, end_country, exchange in transmission_outputs.itertuples(index=False):
+                if start_country != end_country:
+                    self.transmission_data_max_capacity.loc[
+                        (self.transmission_data_max_capacity['start_country'] == start_country) & 
+                        (self.transmission_data_max_capacity['end_country'] == end_country), 
+                        'capacity'
+                    ] -= abs(exchange)
+        if self.transmission_data.empty and not transmission_outputs.empty:
+            self.transmission_data = transmission_outputs
         else:
-            self.transmission_data = pd.concat([self.transmission_data, self.reader.get_transmission_outputs()], ignore_index=True)
-            self.transmission_data = self.transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
-            self.logger.info("Demand updated based on transmission problem results")
+            if not transmission_outputs.empty:
+                self.transmission_data = pd.concat([self.transmission_data, transmission_outputs], ignore_index=True)
+                self.transmission_data = self.transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
+                self.logger.info("Demand updated based on transmission problem results")
 
 
     def update_data(self, t, year):
