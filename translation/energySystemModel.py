@@ -99,7 +99,8 @@ class EnergyModelClass:
                     args=(self.years[i+1], self.countries)
                 )
             self.solve_year(year)
-            self.data_parser = new_data_parser
+            if i + 1 < len(self.years):
+                self.data_parser = new_data_parser
             i += 1
 
         self.logger.info("Energy model solved")
@@ -301,7 +302,7 @@ class EnergyModelClass:
             '-timeout', 
             str(self.config_parser.get_timeout_time_steps()*1000), 
             input_path, 
-            'agents/MaxSum/MaxSumagentJaCoP.xml', 
+            'agents/DPOP/DPOPagentJaCoP.xml', 
             '-o', 
             output_path,
         ]
