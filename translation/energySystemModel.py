@@ -101,7 +101,8 @@ class EnergyModelClass:
                     args=(self.years[i+1], self.countries)
                 )
             self.solve_year(year)
-            self.data_parser = new_data_parser
+            if i + 1 < len(self.years):
+                self.data_parser = new_data_parser
             i += 1
 
         self.logger.info("Energy model solved")
