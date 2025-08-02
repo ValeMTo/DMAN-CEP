@@ -204,11 +204,12 @@ def plot_demand_transmission(data, width=1200, height=900):
             demand = df.at[country, f'demand_0'] if f'demand_0' in df.columns else 0.0
             imports = -tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] < 0), 'exchange'].sum()
             exports = tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] > 0), 'exchange'].sum()
+            total_demand = demand + exports
             imports = imports if not pd.isna(imports) else 0.0
             exports = exports if not pd.isna(exports) else 0.0
             export_within_demand = min(exports, demand)
             cost = df.at[country, '0'] if '0' in df.columns else None
-            cost_per_unit = cost / demand if demand and cost is not None else None
+            cost_per_unit = cost / total_demand if total_demand and cost is not None else None
             records.append({
                 'Iteration': try_int(k),
                 'Country': country,
@@ -453,4 +454,113 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
     fig.update_yaxes(title_text="Cost", secondary_y=False)
     fig.update_yaxes(title_text="Marginal Values", secondary_y=True)
 
+    fig.show()
+
+def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
+    """
+    Plot total cost per country and the variation (delta) per iteration, plus total sum and its variation.
+
+    Parameters:
+    - data_dict: dictionary with structure like dataframes[year][timeslice]
+    - width: plot width in px
+    - height: plot height in px
+    """
+    records = []
+    def try_int(x):
+        try:
+            return int(x)
+        except Exception:
+            return x
+
+    iterations = sorted(data_dict.keys(), key=try_int)
+    for k in iterations:
+        df = data_dict[k]['df']
+        for country in df.index:
+            cost = df.loc[country, '0'] if '0' in df.columns else None
+            records.append({
+                'Iteration': try_int(k),
+                'Country': country,
+                'Cost': cost
+            })
+
+    df_all = pd.DataFrame(records)
+    df_all = df_all.sort_values(['Country', 'Iteration'])
+
+    # Compute per-country cost delta
+    df_all['CostDelta'] = df_all.groupby('Country')['Cost'].diff()
+
+    # Compute total cost and its delta per iteration
+    total_cost = df_all.groupby('Iteration')['Cost'].sum().reset_index()
+    total_cost['Country'] = 'Total'
+    total_cost = total_cost.sort_values('Iteration')
+    total_cost['CostDelta'] = total_cost['Cost'].diff()
+
+    # Combine for plotting
+    df_plot = pd.concat([df_all, total_cost], ignore_index=True)
+    countries = df_all['Country'].unique().tolist() + ['Total']
+
+    import plotly.graph_objects as go
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.12,
+        subplot_titles=["Total Cost per Country and Overall", "Cost Variation (Delta) per Iteration"]
+    )
+
+    # Line plot for cost
+    for country in countries:
+        subset = df_plot[df_plot['Country'] == country]
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'],
+            y=subset['Cost'],
+            mode='lines+markers',
+            name=f"{country} Cost",
+            legendgroup=country,
+            showlegend=True if country != 'Total' else False,
+            line=dict(width=2)
+        ), row=1, col=1)
+    # Add 'Total' to legend
+    subset = df_plot[df_plot['Country'] == 'Total']
+    fig.add_trace(go.Scatter(
+        x=subset['Iteration'],
+        y=subset['Cost'],
+        mode='lines+markers',
+        name="Total Cost",
+        legendgroup='Total',
+        showlegend=True,
+        line=dict(width=3, color='black', dash='dash')
+    ), row=1, col=1)
+
+    # Bar plot for cost delta
+    for country in countries:
+        subset = df_plot[df_plot['Country'] == country]
+        fig.add_trace(go.Bar(
+            x=subset['Iteration'],
+            y=subset['CostDelta'],
+            name=f"{country} ΔCost",
+            legendgroup=country,
+            showlegend=False if country != 'Total' else True,
+            opacity=0.6 if country != 'Total' else 1.0
+        ), row=2, col=1)
+    # Add 'Total' to legend for delta
+    subset = df_plot[df_plot['Country'] == 'Total']
+    fig.add_trace(go.Bar(
+        x=subset['Iteration'],
+        y=subset['CostDelta'],
+        name="Total ΔCost",
+        legendgroup='Total',
+        showlegend=True,
+        marker_color='black',
+        opacity=1.0
+    ), row=2, col=1)
+
+    fig.update_layout(
+        width=width,
+        height=height,
+        title="Total Cost and Cost Variation per Country and Overall Across Iterations",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5)
+    )
+    fig.update_yaxes(title_text="Cost", row=1, col=1)
+    fig.update_yaxes(title_text="ΔCost (Change)", row=2, col=1)
     fig.show()
