@@ -104,8 +104,8 @@ class EnergyModelClass:
             if i + 1 < len(self.years):
                 self.data_parser = new_data_parser
             i += 1
-
         self.logger.info("Energy model solved")
+        self.results_df.to_csv(os.path.join(self.config_parser.get_output_file_path(), 'results.csv'), index=False)
     
     def solve_year(self, year):
         self.logger.info(f"Solving the energy model for {year}")

@@ -75,10 +75,18 @@ class EnergyAgentClass:
         model.fixed_cost = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'FIXED_COST'] * self.year_split)
         model.factor = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'FACTOR'])
         model.min_capacity = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'MIN_INSTALLED_CAPACITY'] if pd.notna(self.tech_df.loc[t, 'MIN_INSTALLED_CAPACITY']) else 0)
+        model.max_capacity = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'TOTAL_ANNUAL_CAPACITY'] if pd.notna(self.tech_df.loc[t, 'TOTAL_ANNUAL_CAPACITY']) else float('inf'))
+        model.max_annual_rate = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'TOTAL_ANNUAL_ACTIVITY_UPPER_LIMIT'] * self.year_split if pd.notna(self.tech_df.loc[t, 'TOTAL_ANNUAL_ACTIVITY_UPPER_LIMIT']) else float('inf'))
+        model.min_annual_rate = Param(model.TECHS, initialize=lambda m, t: self.tech_df.loc[t, 'TOTAL_ANNUAL_ACTIVITY_LOWER_LIMIT'] * self.year_split if pd.notna(self.tech_df.loc[t, 'TOTAL_ANNUAL_ACTIVITY_LOWER_LIMIT']) else 0)
+
 
         model.MinCapacityConstraint = Constraint(model.TECHS, rule=min_capacity_rule)
         model.MaxActivityConstraint = Constraint(model.TECHS, rule=max_activity_rule)
         model.DemandConstraint = Constraint(rule=demand_rule)
+
+        model.MaxCapacityConstraint = Constraint(model.TECHS, rule=lambda m, k: m.capacity[k] <= m.max_capacity[k])
+        model.MaxAnnualRateConstraint = Constraint(model.TECHS, rule=lambda m, k: m.rate_activity[k] <= m.max_annual_rate[k])
+        model.MinAnnualRateConstraint = Constraint(model.TECHS, rule=lambda m, k: m.rate_activity[k] >= m.min_annual_rate[k])
 
         model.TotalCostObjective = Objective(rule=total_cost_rule, sense=minimize)
 
