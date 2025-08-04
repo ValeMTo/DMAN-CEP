@@ -22,10 +22,9 @@ class TransmissionModelClass:
         self.logger.debug('Marginal costs DataFrame initialized')
         self.logger.debug(self.marginal_costs_df)
 
-    def solve(self):
-
+    def update_data(self):
         # Update self.data['capacity'] to be the minimum of the rounded marginal demands of the two countries and the original capacity
-        self.data['capacity'] = self.data.copy().apply(
+        self.data['capacity'] = self.data.apply(
             lambda row: min(
             round(self.delta_demand_map[row['start_country']]['marginal_demand']),
             round(self.delta_demand_map[row['end_country']]['marginal_demand']),
@@ -34,6 +33,8 @@ class TransmissionModelClass:
             axis=1
         )
 
+    def solve(self):
+        self.update_data()
         agents = {}
         for country in self.countries:
             agents[country] = TransmissionAgentClass(
@@ -43,112 +44,58 @@ class TransmissionModelClass:
                 MC_import = self.marginal_costs_df.loc[country, 'MC_import'],
                 MC_export = self.marginal_costs_df.loc[country, 'MC_export'],
                 transmission_cost = self.cost_transmission_line,
-                marginal_demand = self.delta_demand_map[country]['marginal_demand']
+                marginal_demand = round(self.delta_demand_map[country]['marginal_demand'])
             )
-        
-        for name, agent in agents.items():
-            bids = agent.send_bids()
-            for bid in bids:
-                agents[bid.start_country].receive_bid(bid)
-        self.logger.debug("All bids sent and received")
 
-        for name, agent in agents.items():
-            agent.process_bids()
-        self.logger.debug("All bids processed")
-        
         rows = []
-        for agent in agents.values():
-            for bid in agent.outbox:  # Assuming each agent stores sent bids in an outbox
-                if bid.status_sender == TransmissionBidStatus.ACCEPTED and bid.status_receiver == TransmissionBidStatus.ACCEPTED:
-                    rows.append({
-                        'start_country': bid.start_country,
-                        'end_country': bid.end_country,
-                        'exchange': bid.capacity
-                    })
-                    rows.append({
-                        'start_country': bid.end_country,
-                        'end_country': bid.start_country,
-                        'exchange': -bid.capacity
-                    })
+        while len(agents) > 1:
+            for name, agent in agents.items():
+                bids = agent.send_bids()
+                for bid in bids:
+                    agents[bid.start_country].receive_bid(bid)
+            self.logger.debug("All bids sent and received")
+
+            for name, agent in agents.items():
+                agent.process_bids()
+            self.logger.debug("All bids processed")
+            
+            for agent in agents.values():
+                for bid in agent.outbox:  # Assuming each agent stores sent bids in an outbox
+                    if bid.status_sender == TransmissionBidStatus.ACCEPTED and bid.status_receiver == TransmissionBidStatus.ACCEPTED:
+                        rows.append({
+                            'start_country': bid.start_country,
+                            'end_country': bid.end_country,
+                            'exchange': bid.capacity,
+                            'price': bid.price
+                        })
+                        rows.append({
+                            'start_country': bid.end_country,
+                            'end_country': bid.start_country,
+                            'exchange': -bid.capacity,
+                            'price': bid.price
+                        })
+                        self.delta_demand_map[bid.start_country]['marginal_demand'] -= abs(bid.capacity)
+                        self.delta_demand_map[bid.end_country]['marginal_demand'] -= abs(bid.capacity)
+                        self.data.loc[(self.data['start_country'] == bid.start_country) & (self.data['end_country'] == bid.end_country), 'capacity'] -= abs(bid.capacity)
+                        self.data.loc[(self.data['start_country'] == bid.end_country) & (self.data['end_country'] == bid.start_country), 'capacity'] -= abs(bid.capacity)
+
+                        agent.add_trade(capacity=abs(bid.capacity))
+                        agents[bid.start_country].add_trade(capacity=abs(bid.capacity))
+            self.update_data()
+            # Remove agents that are satisfied or excluded
+            to_remove_agents = [name for name, agent in agents.items() if agent.process_status() == 'satisfied' or agent.process_status() == 'excluded']
+            for name in to_remove_agents:
+                del agents[name]
+                self.logger.debug(f"Removed agent {name} from the model")
+            self.data = self.data[~self.data['start_country'].isin(to_remove_agents) & ~self.data['end_country'].isin(to_remove_agents)]
+            for agent in agents.values():
+                agent.erase_messages()
+                agent.erase_neighbours(to_remove_agents)
+                agent.update_data(marginal_demand=self.delta_demand_map[agent.country]['marginal_demand'], data=self.data[self.data['start_country'] == agent.country])
+
+                self.logger.debug(f"Erased messages for agent {agent.country}")
 
         return pd.DataFrame(rows)
-
-    def generate_xml(self):
-        self.logger.debug("Generating XML for transmission model")
-
-        self.xml_generator.add_presentation(name="TransmissionModel", maximize='False')
-        self.xml_generator.add_agents(self.countries)
-        domains = self.generate_domains()
-        self.xml_generator.add_domains(domains)
-
-        for idx, row in self.data.iterrows():
-            self.xml_generator.add_variable(name=f"transmission_{row['start_country']}_{row['end_country']}", domain=f"{row['start_country']}_domain", agent=row['start_country'])
-        
-        already_inside = {}
-        for idx, row in self.data.iterrows():   
-            if f"{row['end_country']}_{row['start_country']}" not in already_inside:
-                self.xml_generator.add_symmetry_constraint(
-                    extra_name=f"{row['start_country']}_{row['end_country']}",
-                    var1=f"transmission_{row['start_country']}_{row['end_country']}",
-                    var2=f"transmission_{row['end_country']}_{row['start_country']}"
-                )
-                already_inside[f"{row['start_country']}_{row['end_country']}"] = True
-
-        for country in self.countries:
-            # Constraint: Power balance per country
-            transmission_variables = [f"transmission_{row['start_country']}_{row['end_country']}" for idx, row in self.data.iterrows() if row['start_country'] == country]
-            marginal_demand=max(round(self.delta_demand_map[country]['marginal_demand']), 0)
-            self.xml_generator.add_power_balance_constraint(
-                extra_name = f"{country}",
-                flow_variables = transmission_variables,
-                delta=marginal_demand,
-            )
-            # Soft constraint: Utility function for transmission costs
-            self.xml_generator.add_utility_function_constaint(
-                extra_name=f"{country}",
-                variables= transmission_variables,
-                import_marginal_costs = [round(self.marginal_costs_df.loc[row['end_country'], 'MC_import']) for idx, row in self.data.iterrows() if row['start_country'] == country],
-                export_marginal_costs = [round(self.marginal_costs_df.loc[country, 'MC_export'])]*len(transmission_variables),
-                cost = round(self.cost_transmission_line),
-            )
-
-        # Constraint: Transmission capacity should be less than or equal to the maximum capacity
-        for idx, row in self.data.iterrows():
-            marginal_demand=max(round(self.delta_demand_map[row['start_country']]['marginal_demand']), 0)
-            self.xml_generator.add_maximum_capacity_constraint(
-                variable_name=f"transmission_{row['start_country']}_{row['end_country']}",
-                max_capacity=min(round(row['capacity']*0.7), marginal_demand),
-            )
-
-    def reduce_marginal_cost_magnitude(self, df):
-        self.logger.debug("Reducing marginal cost magnitude")
-        df = df.copy()
-        max_value = max(abs(df['MC_import']).max(), abs(df['MC_export']).max())
-        df['MC_import'] = pd.to_numeric((df['MC_import'] / max_value * 500)).round().astype(int)
-        df['MC_export'] = pd.to_numeric((df['MC_export'] / max_value * 500)).round().astype(int)
-        return df
-    
-    def generate_domains(self):
-        self.logger.debug("Generating domains for transmission model")
-        domains = {}
-        for country in self.countries:
-            max_domain = round(self.delta_demand_map[country]['marginal_demand'])
-            positive_domain = range(0, max_domain, 50)
-            negative_domain = [ -var for var in positive_domain]
-            domain_values = set(negative_domain + list(positive_domain))
-            domain_values.add(0)
-            domains[f"{country}_domain"] =  sorted(domain_values)
-        return domains
-  
-    def print_xml(self, name):
-        self.logger.debug(f"Printing XML for {name}")
-
-        if not os.path.exists(self.xml_file_path):
-            os.makedirs(self.xml_file_path)
-
-        self.xml_generator.print_xml(output_file=os.path.join(self.xml_file_path, name))
-        self.logger.debug(f"XML generated for at {os.path.join(self.xml_file_path, name)}")
-    
 class TransmissionAgentClass:
     def __init__(self, country, logger, data, MC_import, MC_export, transmission_cost, marginal_demand):
         self.country = country
@@ -158,6 +105,7 @@ class TransmissionAgentClass:
         self.MC_export = MC_export
         self.transmission_cost = transmission_cost
         self.marginal_demand = marginal_demand
+        self.status = 'unsatisfied'
 
         self.inbox = []
         self.outbox = []
@@ -181,7 +129,30 @@ class TransmissionAgentClass:
         self.logger.debug(f"Receiving bid from {bid.sender} to {bid.end_country}")
         bid.set_MC_exporter(self.MC_export)
         self.inbox.append(bid)
+    
+    def process_status(self):
+        if self.marginal_demand <= 0:
+            self.status = 'satisfied'
+        return self.status
+    
+    def add_trade(self, capacity):
+        self.logger.debug(f"Adding trade for {self.country} with capacity {capacity}")
+        self.marginal_demand = round(self.marginal_demand - capacity)
+    
+    def erase_messages(self):
+        self.inbox = []
+        self.outbox = []
+        self.logger.debug(f"Erased messages for {self.country}")
 
+    def erase_neighbours(self, neighbours):
+        self.logger.debug(f"Erasing neighbours for {self.country}: {neighbours}")
+        self.data = self.data[~self.data['end_country'].isin(neighbours)]
+
+    def update_data(self, marginal_demand, data):
+        self.logger.debug(f"Adding trade for {self.country} with marginal demand {marginal_demand}")
+        self.marginal_demand = round(marginal_demand)
+        self.data = data
+        
     def process_bids(self):
         self.logger.debug(f"Processing bids for {self.country}")
 
@@ -200,6 +171,10 @@ class TransmissionAgentClass:
 
         # Sort by utility descending
         all_bids.sort(key=lambda x: x[0], reverse=True)
+
+        if len(all_bids) > 0 and all_bids[0][0] <= 0 or len(all_bids) == 0:
+            self.status = 'excluded'
+            return
 
         # Track used links and capacities
         used_links = set()

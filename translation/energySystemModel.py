@@ -171,7 +171,7 @@ class EnergyModelClass:
         transmission_solver = TransmissionModelClass(
             countries=self.countries,
             data=self.transmission_data_max_capacity.copy(),
-            delta_demand_map=self.demand_map[time],
+            delta_demand_map=self.demand_map[time].copy(),
             marginal_costs_df=self.marginal_costs_df[['MC_import', 'MC_export']],
             cost_transmission_line=self.config_parser.get_cost_transmission_line(),
             logger=self.logger,
@@ -215,7 +215,7 @@ class EnergyModelClass:
             self.demand_map[time][c]['marginal_demand'] = self.demand_map[time][c]['demand'] * self.delta_marginal_cost
 
         if not transmission_outputs.empty:
-            for start_country, end_country, exchange in transmission_outputs.itertuples(index=False):
+            for start_country, end_country, exchange, price in transmission_outputs.itertuples(index=False):
                 if start_country != end_country:
                     self.transmission_data_max_capacity.loc[
                         (self.transmission_data_max_capacity['start_country'] == start_country) & 
