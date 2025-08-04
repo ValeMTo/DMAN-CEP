@@ -46,4 +46,4 @@ config:
           min: -20000
           max: 20000
           step: 200
-  output_file_path: solutions/test-SAPP-5-years
+  output_file_path: solutions/six_countries-v2
