@@ -24,14 +24,15 @@ class TransmissionModelClass:
 
     def update_data(self):
         # Update self.data['capacity'] to be the minimum of the rounded marginal demands of the two countries and the original capacity
-        self.data['capacity'] = self.data.apply(
-            lambda row: min(
-            round(self.delta_demand_map[row['start_country']]['marginal_demand']),
-            round(self.delta_demand_map[row['end_country']]['marginal_demand']),
-            row['capacity']
-            ),
-            axis=1
-        )
+        if not self.data.empty:
+            self.data['capacity'] = self.data.apply(
+                lambda row: min(
+                round(self.delta_demand_map[row['start_country']]['marginal_demand']),
+                round(self.delta_demand_map[row['end_country']]['marginal_demand']),
+                row['capacity']
+                ),
+                axis=1
+            )
 
     def solve(self):
         self.update_data()
