@@ -564,3 +564,421 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
     fig.update_yaxes(title_text="Cost", row=1, col=1)
     fig.update_yaxes(title_text="ΔCost (Change)", row=2, col=1)
     fig.show()
+
+def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
+    """
+    Plot cost, marginal values and MCs across timeslices using only the last iteration per timeslice.
+    
+    Parameters:
+    - timeslice_dict_by_year: dataframes[year], i.e., dict of {timeslice: {k: {'df': ..., ...}}}
+    - width, height: figure dimensions
+    """
+    records = []
+
+    for timeslice, iterations in timeslice_dict_by_year.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys())
+        df = iterations[last_k]['df']
+
+        for country in df.index:
+            records.append({
+                'Timeslice': timeslice,
+                'Country': country,
+                'Cost': df.loc[country, '0'],
+                'MarginalDemand': df.loc[country, 'marginal_demand'],
+                'CostPerUnit': df.loc[country, 'cost_per_unit'],
+                'MC_import': df.loc[country, 'MC_import'],
+                'MC_export': df.loc[country, 'MC_export']
+            })
+
+    df_all = pd.DataFrame(records)
+    countries = df_all['Country'].unique()
+    cols = 4
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=False,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{"secondary_y": True} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_all[df_all['Country'] == country].sort_values('Timeslice')
+
+        # Bar for cost
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['Cost'],
+            name='Cost',
+            marker_color='black',
+            legendgroup='Cost', showlegend=(i == 0),
+        ), row=row, col=col, secondary_y=False)
+
+        # Marginal Demand
+        fig.add_trace(go.Scatter(
+            x=subset['Timeslice'], y=subset['MarginalDemand'],
+            mode='markers+lines', name='Marginal Demand',
+            marker=dict(color='green', symbol='circle'), line=dict(dash='solid'),
+            legendgroup='Marginal Demand', showlegend=(i == 0)
+        ), row=row, col=col, secondary_y=True)
+
+        # Cost per unit
+        fig.add_trace(go.Scatter(
+            x=subset['Timeslice'], y=subset['CostPerUnit'],
+            mode='markers+lines', name='Cost per Unit',
+            marker=dict(color='blue', symbol='square'), line=dict(dash='dot'),
+            legendgroup='Cost per Unit', showlegend=(i == 0)
+        ), row=row, col=col, secondary_y=True)
+
+        # MC Import
+        fig.add_trace(go.Scatter(
+            x=subset['Timeslice'], y=subset['MC_import'],
+            mode='markers+lines', name='MC Import',
+            marker=dict(color='orange', symbol='diamond'), line=dict(dash='dash'),
+            legendgroup='MC Import', showlegend=(i == 0)
+        ), row=row, col=col, secondary_y=True)
+
+        # MC Export
+        fig.add_trace(go.Scatter(
+            x=subset['Timeslice'], y=subset['MC_export'],
+            mode='markers+lines', name='MC Export',
+            marker=dict(color='red', symbol='x'), line=dict(dash='dashdot'),
+            legendgroup='MC Export', showlegend=(i == 0)
+        ), row=row, col=col, secondary_y=True)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Final Iteration Results per Timeslice — Cost and Marginals per Country",
+        barmode='group',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="Total Cost", secondary_y=False)
+    fig.update_yaxes(title_text="Marginal Values", secondary_y=True)
+
+    fig.show()
+
+def plot_annual_capacity_per_technology(data_dict, width=1000, height=700):
+    """
+    Plot installed capacity (max per year) per technology and country.
+
+    Parameters:
+    - data_dict: dataframes[year], i.e., {timeslice: {k: {'tech_df': ...}}}
+    - width, height: dimensions of the figure
+    Returns:
+    - capacity_df: aggregated dataframe
+    - fig: plotly figure
+    """
+    tech_records = []
+
+    for timeslice, iterations in data_dict.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys())
+        tech_df = iterations[last_k].get('tech_df')
+        if tech_df is None or tech_df.empty:
+            continue
+
+        # Only keep demand_type == '0'
+        tech_df_filtered = tech_df[tech_df['demand_type'] == '0'].copy()
+        tech_records.append(tech_df_filtered)
+
+    if not tech_records:
+        print("No technology data available with demand_type == '0'.")
+        return pd.DataFrame(), None
+
+    df_all = pd.concat(tech_records, ignore_index=True)
+
+    # Group and aggregate for capacity (max per tech/country over all timeslices)
+    capacity_df = df_all.groupby(['technology', 'country'], as_index=False).agg({
+        'capacity': 'max',
+        'capital_cost': 'first',
+        'variable_cost': 'first',
+        'fixed_cost': 'first',
+        'factor': 'first',
+        'min_capacity': 'first'
+    })
+
+    countries = capacity_df['country'].unique()
+    cols = 3
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=False, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+
+        subset_cap = capacity_df[capacity_df['country'] == country]
+        fig.add_trace(go.Bar(
+            x=subset_cap['technology'],
+            y=subset_cap['capacity'],
+            name='Installed Capacity',
+            marker_color='blue',
+            showlegend=(i == 0),
+            legendgroup='Capacity',
+            offsetgroup='capacity'
+        ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Installed Capacity (max per year, blue) per Technology and Country",
+        barmode='group',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="Capacity (MW or unit)")
+
+    fig.show()
+
+    return capacity_df
+
+def plot_annual_new_installed_per_technology(data_dict, width=1000, height=700):
+    """
+    Plot new installed capacity (max per year minus min_capacity) per technology and country.
+
+    Parameters:
+    - data_dict: dataframes[year], i.e., {timeslice: {k: {'tech_df': ...}}}
+    - width, height: dimensions of the figure
+    Returns:
+    - new_installed_df: aggregated dataframe
+    - fig: plotly figure
+    """
+    tech_records = []
+
+    for timeslice, iterations in data_dict.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys())
+        tech_df = iterations[last_k].get('tech_df')
+        if tech_df is None or tech_df.empty:
+            continue
+
+        # Only keep demand_type == '0'
+        tech_df_filtered = tech_df[tech_df['demand_type'] == '0'].copy()
+        tech_records.append(tech_df_filtered)
+
+    if not tech_records:
+        print("No technology data available with demand_type == '0'.")
+        return pd.DataFrame(), None
+
+    df_all = pd.concat(tech_records, ignore_index=True)
+
+    # Group and aggregate for capacity (max per tech/country over all timeslices)
+    agg = df_all.groupby(['technology', 'country'], as_index=False).agg({
+        'capacity': 'max',
+        'min_capacity': 'first',
+        'capital_cost': 'first',
+        'variable_cost': 'first',
+        'fixed_cost': 'first',
+        'factor': 'first'
+    })
+    agg['new_installed'] = agg['capacity'] - agg['min_capacity']
+
+    countries = agg['country'].unique()
+    cols = 3
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=False, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+
+        subset_new = agg[agg['country'] == country]
+        fig.add_trace(go.Bar(
+            x=subset_new['technology'],
+            y=subset_new['new_installed'],
+            name='New Installed Capacity',
+            marker_color='orange',
+            showlegend=(i == 0),
+            legendgroup='NewInstalled',
+            offsetgroup='newinstalled'
+        ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="New Installed Capacity (max - min, orange) per Technology and Country",
+        barmode='group',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="New Installed Capacity (MW or unit)")
+
+    fig.show()
+
+    return agg
+
+
+def plot_annual_activity_stacked(data_dict, width=1200, height=800):
+    """
+    Plot stacked rate of activity per timeslice and technology for each country.
+
+    Parameters:
+    - data_dict: dataframes[year], i.e., {timeslice: {k: {'tech_df': ...}}}
+    - width, height: dimensions of the figure
+    Returns:
+    - activity_df: aggregated dataframe
+    - fig: plotly figure
+    """
+    tech_records = []
+
+    for timeslice, iterations in data_dict.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys())
+        tech_df = iterations[last_k].get('tech_df')
+        if tech_df is None or tech_df.empty:
+            continue
+
+        # Only keep demand_type == '0'
+        tech_df_filtered = tech_df[tech_df['demand_type'] == '0'].copy()
+        tech_df_filtered['timeslice'] = timeslice
+        tech_records.append(tech_df_filtered)
+
+    if not tech_records:
+        print("No technology data available with demand_type == '0'.")
+        return pd.DataFrame(), None
+
+    df_all = pd.concat(tech_records, ignore_index=True)
+
+    # Group and aggregate for rate of activity (sum per tech/country/timeslice)
+    activity_df = df_all.groupby(['technology', 'country', 'timeslice'], as_index=False).agg({
+        'rate_activity': 'sum'
+    })
+
+    countries = activity_df['country'].unique()
+    cols = 3
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=False, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+
+        subset_act = activity_df[activity_df['country'] == country]
+        techs = subset_act['technology'].unique()
+        timeslices = sorted(subset_act['timeslice'].unique())
+        for j, tech in enumerate(techs):
+            tech_data = subset_act[subset_act['technology'] == tech]
+            fig.add_trace(go.Bar(
+                x=tech_data['timeslice'],
+                y=tech_data['rate_activity'],
+                name=f'Activity: {tech}',
+                legendgroup=f'Activity_{tech}',
+                showlegend=(i == 0),
+                marker_color=px.colors.qualitative.Plotly[j % len(px.colors.qualitative.Plotly)],
+                offsetgroup=tech,
+                base=None
+            ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Stacked Rate of Activity per Timeslice and Technology per Country",
+        barmode='stack',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="Rate of Activity (stacked, per timeslice)")
+
+    fig.show()
+
+    return activity_df
+
+def plot_capacity_over_time_from_csv(filepath, width=1200, height=700):
+    # --- Load and clean ---
+    df = pd.read_csv(filepath)
+    # Remove rows where all columns except 'TECHNOLOGY' and 'COUNTRY' are NaN
+    cols_to_check = [col for col in df.columns if col not in ['TECHNOLOGY', 'COUNTRY']]
+    df_clean = df.dropna(axis=0, how='all', subset=cols_to_check)
+
+    # --- Extract year columns ---
+    year_cols = [col for col in df_clean.columns if col.startswith("capacity_")]
+
+    # --- Plot 2: Capacity - Baseline, Faceted by Country ---
+    df_norm = df_clean.copy()
+    df_norm['baseline'] = df_norm['baseline'].fillna(0)
+    for col in year_cols:
+        df_norm[col] = df_norm[col] - df_norm['baseline']
+        # Remove rows where all year columns are zero after normalization
+        df_norm = df_norm.loc[~(df_norm[year_cols].abs().sum(axis=1) == 0)]
+    
+    df_norm = df_norm.drop(columns=['baseline'])
+
+    # Melt the dataframe to long format for plotting
+    df_long = df_norm.melt(id_vars=['TECHNOLOGY', 'COUNTRY'], value_vars=year_cols,
+                            var_name='Year', value_name='Capacity')
+
+    # Clean up 'Year' column to just the year number
+    df_long['Year'] = df_long['Year'].str.replace('capacity_', '').astype(int)
+
+    # Assign colors by technology[2:]
+    tech_labels = df_long['TECHNOLOGY'].apply(lambda x: x[2:] if isinstance(x, str) and len(x) > 2 else x)
+    unique_tech_labels = tech_labels.unique()
+    color_map = {label: px.colors.qualitative.Plotly[i % len(px.colors.qualitative.Plotly)] 
+                    for i, label in enumerate(unique_tech_labels)}
+
+    countries = df_long['COUNTRY'].unique()
+    cols = 3
+    rows = (len(countries) + cols - 1) // cols
+
+    if len(countries) == 0 or rows == 0:
+        print("No data available to plot capacity over time.")
+        return
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_long[df_long['COUNTRY'] == country]
+        for tech in subset['TECHNOLOGY'].unique():
+            tech_label = tech[2:] if isinstance(tech, str) and len(tech) > 2 else tech
+            tech_data = subset[subset['TECHNOLOGY'] == tech]
+            fig.add_trace(go.Scatter(
+                x=tech_data['Year'],
+                y=tech_data['Capacity'],
+                mode='lines+markers',
+                name=tech_label,
+                legendgroup=tech_label,
+                showlegend=(i == 0),
+                line=dict(color=color_map[tech_label])
+            ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Installed Capacity Over Time per Technology (Faceted by Country)",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
+    )
+    fig.update_yaxes(title_text="Installed Capacity (MW)")
+    fig.update_xaxes(title_text="Year")
+    fig.show()
