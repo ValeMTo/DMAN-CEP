@@ -3,6 +3,7 @@ config:
     file: ./logs/app.log
     level: DEBUG
   name: SAPP
+  name: three_countries-v1
   outline:
     countries:
     - AO
@@ -30,9 +31,10 @@ config:
     timeout_time_step: 180 # seconds
     steps_rate_activity: 300
     missing_computation: True
-    max_iterations: 30
-    delta_marginal_cost: 0.1
-    marginal_cost_tolerance: 100 
+    max_iterations: 50
+    min_convergence_iterations: 5
+    delta_marginal_cost: 0.10
+    marginal_cost_tolerance: 10
     expansion_enabled: False
     cost_transmission_line: 0
     domains: 
