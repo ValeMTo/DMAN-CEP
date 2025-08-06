@@ -3,7 +3,7 @@ config:
     file: ./logs/app.log
     level: DEBUG
   name: SAPP
-  name: three_countries-v1
+  name: SAPP-v2
   outline:
     countries:
     - AO
@@ -24,7 +24,7 @@ config:
     - 2040
     - 2045
     - 2050
-    data_file_path: ./osemosys_data/input_data/TEMBA_SSP4-60.xlsx
+    data_file_path: ./osemosys_data/input_data_original/TEMBA_SSP4-60.xlsx
     fuel_code_file_path: ./osemosys_data/fuelcodes(in).csv
     tech_code_file_path: ./osemosys_data/techcodes(in).csv
     representation_per_year: ['S1D1', 'S1D2', 'S2D1', 'S2D2', 'S3D1', 'S3D2', 'S4D1', 'S4D2'] # Representations inside an year
@@ -33,7 +33,7 @@ config:
     missing_computation: True
     max_iterations: 50
     min_convergence_iterations: 5
-    delta_marginal_cost: 0.10
+    delta_marginal_cost: 0.20
     marginal_cost_tolerance: 10
     expansion_enabled: False
     cost_transmission_line: 0
@@ -46,4 +46,4 @@ config:
           min: -20000
           max: 20000
           step: 200
-  output_file_path: solutions/six_countries-v2
+  output_file_path: solutions/SAPP-v2-0.2
