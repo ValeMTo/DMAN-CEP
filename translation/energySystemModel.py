@@ -202,7 +202,7 @@ class EnergyModelClass:
             )
 
         # Use solve_country_optimization_wrapper in parallel, collect results, and store in parent method
-        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        with ProcessPoolExecutor(max_workers=min(os.cpu_count(), len(args_list))) as executor:
             futures = {executor.submit(solve_country_optimization_wrapper, args): args[0] for args in args_list}
             for future in as_completed(futures):
                 country, plus_result, minus_result, zero_result = future.result()
@@ -230,7 +230,7 @@ class EnergyModelClass:
             (country, self.logger, year, t, self.time_resolution, self.yearly_split, self.opts)
             for country in self.countries
         ]
-        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+        with ProcessPoolExecutor(max_workers=min(os.cpu_count(), len(args_list))) as executor:
             futures = {executor.submit(build_profile_args, args): args[0] for args in args_list}
             for future in as_completed(futures):
                 country, profile = future.result()
