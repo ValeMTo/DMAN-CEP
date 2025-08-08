@@ -3,7 +3,7 @@ config:
     file: ./logs/app.log
     level: DEBUG
   name: SAPP
-  name: SAPP-v2
+  name: SAPP-v3
   outline:
     countries:
     - AO
@@ -42,4 +42,4 @@ config:
           min: -20000
           max: 20000
           step: 200
-  output_file_path: solutions/SAPP-v2-0.2
+  output_file_path: solutions/SAPP-v3-0.2
