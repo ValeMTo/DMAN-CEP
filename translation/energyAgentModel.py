@@ -80,13 +80,13 @@ class EnergyAgentClass:
                     "scenario": {"planning_horizons": [self.year]},
                     "snapshots": self.calculate_snapshots(),
                     "load_options": {
-                    "prediction_year": self.year 
+                        "prediction_year": self.year 
                          },
                     #"costs": {"year": self.year},
                     "convergence_factor": scale,  
                     "demand": self.demand,  # Demand value for the agent
                 },
-                cores=8,
+                cores=1,
                 dryrun=False,
             )
 

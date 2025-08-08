@@ -33,14 +33,14 @@ def build_profile_args(args):
         ).build_demand_profile()
     )
 
-def xxx(args):
-            (country, time, year, logger, time_resolution, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
+def solve_country_optimization_wrapper(args):
+            (country, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
             energy_country_class = EnergyAgentClass(
                 country=country,
                 logger=logger,
                 year=year,
                 timeslice=time,
-                index_time=time_resolution.index(time),
+                index_time=index_time,
                 yearly_split=yearly_split,
                 demand=demand,
                 opts=opts,
@@ -50,7 +50,7 @@ def xxx(args):
                 country,
                 energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete=not first_optimization),
                 energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False),
-                energy_country_class.solve(complete=False)
+                energy_country_class.solve(scale=1.0, complete=False)
             )
 class EnergyModelClass:
     def __init__(self):
@@ -133,7 +133,7 @@ class EnergyModelClass:
         for year in self.years:
             self.solve_year(year)
         self.logger.info("Energy model solved")
-        self.results_df.to_csv(os.path.join(self.config_parser.get_output_file_path(), 'results.csv'), index=False)
+        #self.results_df.to_csv(os.path.join(self.config_parser.get_output_file_path(), 'results.csv'), index=False)
     
     def solve_year(self, year):
         self.logger.info(f"Solving the energy model for {year}")
@@ -197,14 +197,19 @@ class EnergyModelClass:
         for country in self.countries:
             self.reader.set_demand(
                 self.demand_map[t][country]['demand'],
-                '0',
-                country
+                demand_type='0',
+                country=country
             )
 
+        # Use solve_country_optimization_wrapper in parallel, collect results, and store in parent method
         with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = {executor.submit(self.solve_country_optimization, *args): args[0] for args in args_list}
+            futures = {executor.submit(solve_country_optimization_wrapper, args): args[0] for args in args_list}
             for future in as_completed(futures):
-                future.result()
+                country, plus_result, minus_result, zero_result = future.result()
+                self.reader.store(*plus_result, demand_type='+', country=country)
+                self.reader.store(*minus_result, demand_type='-', country=country)
+                self.reader.store(*zero_result, demand_type='0', country=country)
+                self.first_optimization[country] = True
 
         marginal_costs_df = self.calculate_marginal_costs(t, year)
         self.logger.info(f"Marginal costs calculated for time {t} and year {year}")
@@ -344,8 +349,9 @@ class EnergyModelClass:
             demand=demand,
             opts=opts,
         )
-        self.reader.store(*energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete= not first_optimization), demand_type=f"+", country=country)
-        self.reader.store(*energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False), demand_type=f"-", country=country)
-        self.reader.store(*energy_country_class.solve(complete=False), demand_type='0', country=country)
+        self.reader.store(*energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete= not first_optimization), demand_type='+', country=country)
+        self.reader.store(*energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False), demand_type='-', country=country)
+        self.reader.store(*energy_country_class.solve(scale=1.0, complete=False), demand_type='0', country=country)
         self.first_optimization[country] = True
+        
 

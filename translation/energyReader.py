@@ -46,11 +46,13 @@ class EnergyReader():
         self.df.loc[country, f"demand_{demand_type}"] = demand
         if demand_type == '0':
             self.df.loc[country, 'marginal_demand'] = demand * self.delta
+            self.df.loc[country, 'demand_+'] = demand * (1 + self.delta)
+            self.df.loc[country, 'demand_-'] = demand * (1 - self.delta)
     
     def store(self, total_cost, df, demand_type, country):
         self.df.loc[country, demand_type] = total_cost
         if demand_type == '0':
-            demand = self.df[country, f"demand_{demand_type}"]
+            demand = self.df.loc[country, f"demand_{demand_type}"]
             self.df.loc[country, 'cost_per_unit'] = total_cost / demand if demand > 0 else 0
 
         if not df.empty and not df.isna().all(axis=None):
