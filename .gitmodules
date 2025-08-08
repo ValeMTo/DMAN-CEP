@@ -1,0 +1,3 @@
+[submodule "pypsa_earth"]
+	path = pypsa_earth
+	url = https://github.com/pypsa/pypsa-earth.git
