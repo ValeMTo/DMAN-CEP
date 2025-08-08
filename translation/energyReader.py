@@ -18,7 +18,7 @@ class EnergyReader():
         self.countries = countries
 
         self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'cost_per_unit', 'MC_import', 'MC_export'], index=countries)
-        self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'capacity', 'rate_activity', 'capital_cost', 'variable_cost', 'fixed_cost', 'factor', 'min_capacity'])
+        self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'Installed Capacity', 'Supply', 'Capital Expenditure', 'Operational Expenditure', 'Capacity Factor', 'Curtailment'])
 
         self.transmission_df = None
 
@@ -28,7 +28,7 @@ class EnergyReader():
         self.output_folder_path = output_folder_path
 
         return self.load_transmission()
-
+    
     def get_total_cost_table(self):
         return self.df.copy()
     
@@ -36,16 +36,25 @@ class EnergyReader():
         self.df['MC_import'] = (self.df["0"] - self.df[f"-"]) / self.df['marginal_demand']
         self.df['MC_export'] = (self.df[f"+"] - self.df["0"]) / self.df['marginal_demand']
         self.df[['MC_import', 'MC_export']] = self.df[['MC_import', 'MC_export']].clip(lower=0)
+
+    def get_marginal_demand(self):
+        if 'marginal_demand' not in self.df.columns:
+            raise ValueError("marginal_demand column not found in the DataFrame")
+        return self.df['marginal_demand'].copy()
     
-    def store(self, total_cost, demand, df, demand_type, country):
-        self.df.loc[country, demand_type] = total_cost
-        self.df.loc[country, f'demand_{demand_type}'] = demand
+    def set_demand(self, demand, demand_type, country):
+        self.df.loc[country, f"demand_{demand_type}"] = demand
         if demand_type == '0':
             self.df.loc[country, 'marginal_demand'] = demand * self.delta
+    
+    def store(self, total_cost, df, demand_type, country):
+        self.df.loc[country, demand_type] = total_cost
+        if demand_type == '0':
+            demand = self.df[country, f"demand_{demand_type}"]
             self.df.loc[country, 'cost_per_unit'] = total_cost / demand if demand > 0 else 0
 
-        df['demand_type'] = demand_type
         if not df.empty and not df.isna().all(axis=None):
+            df['demand_type'] = demand_type
             df = df.reindex(columns=self.tech_df.columns, fill_value=None)
             self.tech_df = pd.concat([self.tech_df, df], ignore_index=True)
 

@@ -1,11 +1,10 @@
 from translation.parsers.configParser import ConfigParserClass
-from translation.parsers.osemosysDataParser import osemosysDataParserClass
+from translation.parsers.dataParser import dataParserClass
 from translation.xmlGenerator import XMLGeneratorClass
 from translation.energyAgentModel import EnergyAgentClass
 from translation.transmissionModel import TransmissionModelClass
 from translation.energyReader import EnergyReader
 from translation.worker import ThreadManager
-from deprecated import deprecated
 import pandas as pd
 import logging
 import os
@@ -15,8 +14,44 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from threading import Thread
+import yaml
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
+def build_profile_args(args):
+    country, logger, year, t, time_resolution, yearly_split, opts = args
+    return (
+        country,
+        EnergyAgentClass(
+            country=country,
+            logger=logger,
+            year=year,
+            timeslice=t,
+            index_time=time_resolution.index(t),
+            yearly_split=yearly_split,
+            demand=None,
+            opts=opts,
+        ).build_demand_profile()
+    )
 
+def xxx(args):
+            (country, time, year, logger, time_resolution, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
+            energy_country_class = EnergyAgentClass(
+                country=country,
+                logger=logger,
+                year=year,
+                timeslice=time,
+                index_time=time_resolution.index(time),
+                yearly_split=yearly_split,
+                demand=demand,
+                opts=opts,
+            )
+            # This is a placeholder; you may need to adapt how results are stored/returned
+            return (
+                country,
+                energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete=not first_optimization),
+                energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False),
+                energy_country_class.solve(complete=False)
+            )
 class EnergyModelClass:
     def __init__(self):
         self.config_parser = ConfigParserClass(file_path='config.yaml')
@@ -35,31 +70,32 @@ class EnergyModelClass:
         self.name = self.config_parser.get_problem_name()
         self.time_resolution = self.config_parser.get_annual_time_resolution()
         self.years = self.config_parser.get_years()
+        self.opts = self.get_model_options()
 
         self.results_df = None
         self.marginal_costs_df = None
-        self.demand_map = {}
         self.country_data_per_time = {}
 
-        self.thread_manager = ThreadManager()
-        self.data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
-        self.thread_manager.run_parallel(
-            name=f'data_parser_load_{self.years[0]}',
-            func=self.data_parser.load_data,
-            args=(self.years[0], self.countries)
-        )
+        self.data_parser = dataParserClass(logger=self.logger)
+
         self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries, yearly=True)
         self.transmission_data_max_capacity = self.transmission_data_capacity.copy()
         self.transmission_data = pd.DataFrame()
-        self.xml_generator = XMLGeneratorClass(logger = self.logger)
+        self.yearly_split = self.build_yearly_split_map()
+        self.demand_map = {}
 
-        self.logger.info("Energy model initialized")
         self.max_iteration = self.config_parser.get_max_iteration()
         self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
         self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
 
         self.convergence_iteration = 0
+        self.logger.info("Energy model initialized")
 
+
+    def get_model_options(self):
+        with open('pypsa_earth/config.yaml', 'r') as f:
+            config = yaml.safe_load(f)
+        return config["scenario"]
 
     def create_logger(self, log_level, log_file):
         log_dir = os.path.dirname(log_file)
@@ -73,46 +109,38 @@ class EnergyModelClass:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         return logging.getLogger(__name__)
-    
-    def build_demand_map(self, year, t): 
-        self.logger.info(f"Building demand map for year {year}")
-        self.demand_map[t] = {}
-        for country in self.countries:
-            year_split, demand = self.data_parser.load_demand(year, country, t)
-            self.demand_map[t][country] = {
-                        'demand': demand,
-                        'marginal_demand': demand * self.delta_marginal_cost,
-                    }
-        self.demand_map[t]['year_split'] = year_split # year_split is the same for all countries for timeslice t
-        self.transmission_data_max_capacity['capacity'] = self.transmission_data_capacity['capacity'] * self.demand_map[t]['year_split']
+
+    def build_yearly_split_map(self):
+        self.logger.info(f"Building yearly split map")
+        yearly_split =  (365 / len(self.time_resolution)) / 365
+
+        self.transmission_data_max_capacity['capacity'] = self.transmission_data_max_capacity['capacity'] * yearly_split
+        return yearly_split
+
+    def build_demand_map(self):
+        self.logger.info("Building demand map")
+        demand_map = {}
+        for t in self.time_resolution:
+            demand_map[t] = {}
+            for c in self.countries:
+                demand_map[t][c] = {
+                    'demand': None,
+                }
+        self.demand_map = demand_map
 
     def solve(self):
         self.logger.info("Solving the energy model")
-        i = 0
-        while i < len(self.years):
-            year = self.years[i]
-            self.thread_manager.wait_for(f'data_parser_load_{year}')
-            self.data_parser.add_previous_installed_capacity(self.years[i-1], self.results_df)
-            if i + 1 < len(self.years):
-                new_data_parser = osemosysDataParserClass(logger = self.logger, file_path=self.config_parser.get_file_path())
-                self.thread_manager.run_parallel(
-                    name=f'data_parser_load_{self.years[i+1]}',
-                    func=new_data_parser.load_data,
-                    args=(self.years[i+1], self.countries)
-                )
+        for year in self.years:
             self.solve_year(year)
-            if i + 1 < len(self.years):
-                self.data_parser = new_data_parser
-            i += 1
         self.logger.info("Energy model solved")
         self.results_df.to_csv(os.path.join(self.config_parser.get_output_file_path(), 'results.csv'), index=False)
     
     def solve_year(self, year):
         self.logger.info(f"Solving the energy model for {year}")
-        
+        self.build_demand_map()
         for t in tqdm(self.time_resolution, desc=f"Solving year {year}"):
-            self.build_demand_map(year, t)
-            self.extract_data(year, t)
+            self.calculate_demand_profiles(t, year)
+            self.first_optimization = {country: False for country in self.countries}
             for k in tqdm(range(self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
                 self.reader = self.prepare_reader(k=k, t=t, year=year)
                 marginal_costs_df = self.solve_internal_problem(t, year)
@@ -123,7 +151,7 @@ class EnergyModelClass:
                     break
                 self.solve_transmission_problem(t, year)
                 self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
-            self.update_data(t, year)
+            #self.update_data(t, year)
             if k == self.max_iteration:
                 self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
             marginal_costs_df = None
@@ -150,13 +178,38 @@ class EnergyModelClass:
         if not os.path.exists(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems")):
             os.makedirs(os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}/internal/problems"))
 
+        args_list = [
+            (
+                country,
+                t,
+                year,
+                self.logger,
+                self.time_resolution.index(t),
+                self.yearly_split,
+                self.demand_map[t][country]['demand'],
+                self.opts,
+                self.delta_marginal_cost,
+                self.first_optimization[country]
+            )
+            for country in self.countries
+        ]
+
         for country in self.countries:
-            self.solve_country_optimization(country, t)
+            self.reader.set_demand(
+                self.demand_map[t][country]['demand'],
+                '0',
+                country
+            )
+
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = {executor.submit(self.solve_country_optimization, *args): args[0] for args in args_list}
+            for future in as_completed(futures):
+                future.result()
 
         marginal_costs_df = self.calculate_marginal_costs(t, year)
         self.logger.info(f"Marginal costs calculated for time {t} and year {year}")
         return marginal_costs_df
-    
+
     def calculate_marginal_costs(self, t, year):
         self.logger.info(f"Calculating marginal costs for time {t} and year {year}")
 
@@ -164,6 +217,20 @@ class EnergyModelClass:
         output_df = self.reader.get_total_cost_table()
 
         return output_df
+
+    def calculate_demand_profiles(self, t, year):
+        self.logger.info(f"Calculating demand profiles for time {t} and year {year}")
+
+        args_list = [
+            (country, self.logger, year, t, self.time_resolution, self.yearly_split, self.opts)
+            for country in self.countries
+        ]
+        with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = {executor.submit(build_profile_args, args): args[0] for args in args_list}
+            for future in as_completed(futures):
+                country, profile = future.result()
+                self.demand_map[t][country]['demand'] = profile
+                self.demand_map[t][country]['marginal_demand'] = profile * self.delta_marginal_cost
 
     def solve_transmission_problem(self, time, year):
         self.logger.info(f"Solving transmission problem for time {time}")
@@ -228,7 +295,7 @@ class EnergyModelClass:
             if not transmission_outputs.empty:
                 self.transmission_data = pd.concat([self.transmission_data, transmission_outputs], ignore_index=True)
                 self.transmission_data = self.transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
-                self.logger.info("Demand updated based on transmission problem results")
+                self.logger.info("Exchange updated based on transmission problem results")
 
 
     def update_data(self, t, year):
@@ -264,127 +331,21 @@ class EnergyModelClass:
 
         if self.config_parser.get_expansion_enabled():
             raise NotImplementedError("Expansion is not implemented yet.")
-    
-    def extract_data(self, year, time):
-        for country in self.countries:
-            self.country_data_per_time[country] = self.data_parser.get_country_data(country, time)
-        self.extract_costs(self.country_data_per_time, time)
 
-    def extract_costs(self, data, time):
-        self.logger.debug("Extracting costs from the data")
-
-        all_data = []
-        for c in self.countries:
-            country_data = data[c][[ 'CAPITAL_COST', 'VARIABLE_COST', 'FIXED_COST', 'MIN_INSTALLED_CAPACITY', 'OPERATIONAL_LIFETIME']].copy()
-            country_data['year_split'] = self.demand_map[time]['year_split']
-            all_data.append(country_data)
-        self.data = pd.concat(all_data, ignore_index=False)
-        self.data['TECHNOLOGY'] = self.data.index
-        self.data.reset_index(drop=True, inplace=True)
-
-    def solve_country_optimization(self, country, time):
+    def solve_country_optimization(self, country, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization):
 
         energy_country_class = EnergyAgentClass(
             country=country,
-            logger=self.logger,
-            data=self.country_data_per_time[country],
-            year_split=self.demand_map[time]['year_split'],
-            demand=self.demand_map[time][country]['demand'],
+            logger=logger,
+            year=year,
+            timeslice=time,
+            index_time=index_time,
+            yearly_split=yearly_split,
+            demand=demand,
+            opts=opts,
         )
-        self.reader.store(*energy_country_class.run(), demand_type='0', country=country)
-        energy_country_class.change_demand(demand_variation_percentage=self.delta_marginal_cost)
-        self.reader.store(*energy_country_class.solve(), demand_type=f"+", country=country)
-        energy_country_class.change_demand(demand_variation_percentage=-self.delta_marginal_cost)
-        self.reader.store(*energy_country_class.solve(), demand_type=f"-", country=country)
-
-    def solve_DCOP(self, input_path, output_path):
-        self.logger.debug(f"Solving DCOP for {input_path} and saving to {output_path}")
-        java_command = [
-            'java', 
-            '-Xmx4G', 
-            '-ea',
-            '-cp', 
-            'frodo2.19.jar:jdom2-2.0.6.jar:jacop-4.7.0.jar', 
-            'frodo2.algorithms.AgentFactory', 
-            '-timeout', 
-            str(self.config_parser.get_timeout_time_steps()*1000), 
-            input_path, 
-            'agents/MaxSum/MaxSumagentJaCoP.xml', 
-            '-o', 
-            output_path,
-        ]
-        java_process = subprocess.Popen(java_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = java_process.communicate()
-        
-        # Log both stdout and stderr from the Java process
-        if stdout:
-            self.logger.info(f"Java stdout for {input_path}:\n{stdout.decode()}")
-        if stderr:
-            self.logger.error(f"Java stderr for {input_path}:\n{stderr.decode()}")
-        if java_process.returncode == 0:
-            self.logger.info(f"Java program finished successfully for {input_path}.")
-        else:
-            self.logger.error(f"Java program encountered an error for {input_path}.")
-
-    def solve_folder(self, folder):
-        problem_folder = os.path.join(folder, f"problems")
-        output_folder = os.path.join(folder, f"outputs")
-
-        if not os.path.exists(problem_folder):
-            self.logger.error(f"Problem folder {problem_folder} does not exist.")
-            raise FileNotFoundError(f"Problem folder {problem_folder} does not exist.")
-
-        if not os.path.exists(output_folder):
-            os.makedirs(output_folder)
-
-        def process_file(file_name):
-            if file_name.endswith(".xml"):
-                input_path = os.path.join(problem_folder, file_name)
-                output_path = os.path.join(output_folder, f"{file_name.replace('.xml', '')}_output.xml")
-                self.solve_DCOP(input_path, output_path)
-
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = [executor.submit(process_file, file_name) for file_name in os.listdir(problem_folder)]
-            for future in as_completed(futures):
-                future.result()  # Wait for each thread to complete
-
-        if 'transmission' in folder:
-            return self.reader.load(output_folder_path=output_folder)
-        
-        return output_folder
-    
-    def create_domains(self, country, time, problem_type='internal'):
-        self.logger.debug(f"Creating domains for {problem_type} problem in the model")
-        domains = self.config_parser.get_domains()
-
-        if problem_type == 'internal':
-            if country is None or time is None:
-                self.logger.error("Country and year must be provided for internal problem type.")
-                raise ValueError("Country and year must be provided for internal problem type.")
-            
-            domains_mapping = {
-                'capacity_domain': list(range(
-                    domains['capacity']['min'],
-                    domains['capacity']['max'] + 1,
-                    domains['capacity']['step']
-                )),
-                'rateActivity_domain': list(range(
-                    0,
-                    round(self.demand_map[time][country]['demand'] + self.demand_map[time][country]['demand']*0.10),
-                    min(round(self.demand_map[time][country]['demand']/self.config_parser.get_steps_rate_activity()), 100)
-                ))
-            }
-            return domains_mapping
-        elif problem_type == 'transmission':
-            domains_mapping = {
-                'capacity_domain': list(range(
-                    domains['transmission']['min'],
-                    domains['transmission']['max'] + 1,
-                    domains['transmission']['step'], 
-                ))
-            }
-            return domains_mapping
-
-        self.logger.warning(f"Problem type {problem_type} not recognized. Returning empty domains.")
-        raise ValueError(f"Problem type {problem_type} in create_domains method not recognized.")
+        self.reader.store(*energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete= not first_optimization), demand_type=f"+", country=country)
+        self.reader.store(*energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False), demand_type=f"-", country=country)
+        self.reader.store(*energy_country_class.solve(complete=False), demand_type='0', country=country)
+        self.first_optimization[country] = True
 

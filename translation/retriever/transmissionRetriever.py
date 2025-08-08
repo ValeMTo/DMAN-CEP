@@ -174,7 +174,7 @@ class transmissionRetrieverClass():
         else:  # HVDC or very high-voltage AC
             return 2500
     
-    def extract_cross_border_lines(self, unit='TJ', yearly=False):
+    def extract_cross_border_lines(self, unit='MWh', yearly=False):
         self.logger.info("Extracting cross-border lines")
 
         countries, lines = self.get_power_lines()
@@ -216,6 +216,8 @@ class transmissionRetrieverClass():
             df['capacity'] = df['capacity'] * 1e-3
         elif unit == 'TJ':
             df['capacity'] = df['capacity'] * 1e-3 * 3.6
+        elif unit == 'MWh':
+            df['capacity'] = df['capacity']  # Already in MWh
         else:
             raise ValueError("Unsupported unit. Use 'GWh' or 'TJ'.")
         if yearly:

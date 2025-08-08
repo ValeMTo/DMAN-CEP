@@ -3,7 +3,7 @@ from translation.retriever.transmissionRetriever import transmissionRetrieverCla
 
 class dataParserClass:
     def __init__(self, logger):
-        pass
+        self.logger = logger
     
     def get_country_data(self, country, year, timeslice):
         """
