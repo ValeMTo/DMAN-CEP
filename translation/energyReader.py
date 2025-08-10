@@ -7,17 +7,18 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 class EnergyReader():
-    def __init__(self, k, t, year, countries, delta):
+    def __init__(self, k, t, year, exchange_cost, countries, delta):
 
         self.k = k
         self.t = t
         self.year = year
         self.delta = delta  # Delta for marginal cost calculation
+        self.exchange_cost = exchange_cost
 
         self.countries_check = {}
         self.countries = countries
 
-        self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'cost_per_unit', 'MC_import', 'MC_export'], index=countries)
+        self.df = pd.DataFrame(columns = ['-', '0', '+', 'demand_-', 'demand_0', 'demand_+', 'marginal_demand', 'cost_per_unit', 'MC_import', 'MC_export', 'total_cost_after_exchange'], index=countries)
         self.tech_df = pd.DataFrame(columns=['technology','country', 'demand_type', 'Installed Capacity', 'Supply', 'Capital Expenditure', 'Operational Expenditure', 'Capacity Factor', 'Curtailment'])
 
         self.transmission_df = None
@@ -51,6 +52,7 @@ class EnergyReader():
     
     def store(self, total_cost, df, demand_type, country):
         self.df.loc[country, demand_type] = total_cost
+        self.df.loc[country, 'total_cost_after_exchange'] = total_cost
         if demand_type == '0':
             demand = self.df.loc[country, f"demand_{demand_type}"]
             self.df.loc[country, 'cost_per_unit'] = total_cost / demand if demand > 0 else 0
@@ -161,6 +163,10 @@ class EnergyReader():
         if not isinstance(transmission_data, pd.DataFrame):
             raise ValueError("transmission_data must be a pandas DataFrame")
         self.transmission_df = transmission_data
+        for idx, row in self.transmission_df.iterrows():
+            self.df.at[row['start_country'], 'total_cost_after_exchange'] -= row['price'] * row['exchange']
+            if row['exchange'] < 0:
+                self.df.at[row['start_country'], 'total_cost_after_exchange'] -= self.exchange_cost * row['exchange']
 
     def get_transmission_outputs(self):
         if self.transmission_df is None:

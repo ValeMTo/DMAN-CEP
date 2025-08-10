@@ -170,6 +170,7 @@ class EnergyModelClass:
             k=k,
             t=t,
             year=year,
+            exchange_cost=self.config_parser.get_cost_transmission_line(),
             countries=self.countries,
             delta=self.delta_marginal_cost
         )

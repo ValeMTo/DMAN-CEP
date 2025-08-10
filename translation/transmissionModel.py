@@ -123,7 +123,7 @@ class TransmissionAgentClass:
                         start_country=row['end_country'],
                         end_country=row['start_country'],
                         capacity=row['capacity'],
-                        price=(self.MC_import - self.transmission_cost) * (1 - self.cost_percentage_threshold)
+                        price=round((self.MC_import - self.transmission_cost) * (1 - self.cost_percentage_threshold), 2)
                     )
                     self.outbox.append(bid)
         return self.outbox
