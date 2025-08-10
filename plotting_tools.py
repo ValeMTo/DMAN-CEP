@@ -207,7 +207,6 @@ def plot_demand_transmission(data, width=1200, height=900):
             total_demand = demand + exports
             imports = imports if not pd.isna(imports) else 0.0
             exports = exports if not pd.isna(exports) else 0.0
-            export_within_demand = min(exports, demand)
             cost = df.at[country, '0'] if '0' in df.columns else None
             cost_per_unit = cost / total_demand if total_demand and cost is not None else None
             records.append({
@@ -215,7 +214,7 @@ def plot_demand_transmission(data, width=1200, height=900):
                 'Country': country,
                 'Demand': demand,
                 'Import': imports,
-                'Export': export_within_demand,
+                'Export': exports,
                 'CostPerUnit': cost_per_unit
             })
 
