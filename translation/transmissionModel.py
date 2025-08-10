@@ -45,6 +45,7 @@ class TransmissionModelClass:
                 data = self.data[self.data['start_country'] == country],
                 MC_import = self.marginal_costs_df.loc[country, 'MC_import'],
                 MC_export = self.marginal_costs_df.loc[country, 'MC_export'],
+                cost_percentage_threshold = self.cost_percentage_threshold,
                 transmission_cost = self.cost_transmission_line,
                 marginal_demand = round(self.delta_demand_map[country]['marginal_demand'])
             )
@@ -100,12 +101,13 @@ class TransmissionModelClass:
         return pd.DataFrame(rows)
     
 class TransmissionAgentClass:
-    def __init__(self, country, logger, data, MC_import, MC_export, transmission_cost, marginal_demand):
+    def __init__(self, country, logger, data, MC_import, MC_export, cost_percentage_threshold, transmission_cost, marginal_demand):
         self.country = country
         self.logger = logger
         self.data = data
         self.MC_import = MC_import
         self.MC_export = MC_export
+        self.cost_percentage_threshold = cost_percentage_threshold
         self.transmission_cost = transmission_cost
         self.marginal_demand = marginal_demand
         self.status = 'unsatisfied'
@@ -123,7 +125,7 @@ class TransmissionAgentClass:
                         start_country=row['end_country'],
                         end_country=row['start_country'],
                         capacity=row['capacity'],
-                        price=round((self.MC_import - self.transmission_cost) * (1 - self.cost_percentage_threshold), 2)
+                        price=round((self.MC_import) * (1 + self.cost_percentage_threshold) + self.transmission_cost, 2)
                     )
                     self.outbox.append(bid)
         return self.outbox
@@ -162,13 +164,11 @@ class TransmissionAgentClass:
         # Gather all bids: incoming (inbox) and outgoing (outbox)
         all_bids = []
         for bid in self.inbox:
-            # As importer
             utility = (bid.price - self.MC_export) * bid.capacity
             all_bids.append((utility, 'exporter', bid))
             self.logger.debug(f"Bid from {bid.sender} to {bid.end_country} with utility {utility} as exporter")
         for bid in self.outbox:
-            # As exporter
-            utility = (bid.price - bid.MC_exporter) * bid.capacity
+            utility = (bid.price - bid.MC_exporter * (1 + self.cost_percentage_threshold)) * bid.capacity
             all_bids.append((utility, 'importer', bid))
             self.logger.debug(f"Bid from {self.country} to {bid.end_country} with utility {utility} as importer")
 
