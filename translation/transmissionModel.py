@@ -8,13 +8,14 @@ from itertools import product
 from enum import Enum
 
 class TransmissionModelClass:
-    def __init__(self, countries, data, delta_demand_map, marginal_costs_df, cost_transmission_line, logger, xml_file_path, expansion_enabled):
+    def __init__(self, countries, data, delta_demand_map, marginal_costs_df, cost_transmission_line, cost_threshold, logger, xml_file_path, expansion_enabled):
         self.logger = logger
         self.countries = countries
         self.data = data
         self.delta_demand_map = delta_demand_map
         self.marginal_costs_df = marginal_costs_df
         self.cost_transmission_line = cost_transmission_line
+        self.cost_percentage_threshold = cost_threshold
         self.xml_file_path = xml_file_path
         self.xml_generator = XMLGeneratorClass(logger=self.logger)
         self.expansion_enabled = expansion_enabled
@@ -97,6 +98,7 @@ class TransmissionModelClass:
                 self.logger.debug(f"Erased messages for agent {agent.country}")
 
         return pd.DataFrame(rows)
+    
 class TransmissionAgentClass:
     def __init__(self, country, logger, data, MC_import, MC_export, transmission_cost, marginal_demand):
         self.country = country
@@ -121,7 +123,7 @@ class TransmissionAgentClass:
                         start_country=row['end_country'],
                         end_country=row['start_country'],
                         capacity=row['capacity'],
-                        price=(self.MC_import - self.transmission_cost)
+                        price=(self.MC_import - self.transmission_cost) * (1 - self.cost_percentage_threshold)
                     )
                     self.outbox.append(bid)
         return self.outbox

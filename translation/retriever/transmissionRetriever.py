@@ -133,7 +133,6 @@ class transmissionRetrieverClass():
         countries_array_fixed = ["NA" if c == "NM" else c for c in countries_array]
         world = gpd.read_file("./data/shapefiles/ne_110m_admin_0_countries.shp")
         filtered_countries = world[world['ISO_A2'].isin(countries_array_fixed)].copy()
-        filtered_countries['ISO_A2'] = filtered_countries['ISO_A2'].replace("NA", "NM")
         return filtered_countries
     
     def get_line_countries(self, line, countries):

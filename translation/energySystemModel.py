@@ -18,11 +18,12 @@ import yaml
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 def build_profile_args(args):
-    country, logger, year, t, time_resolution, yearly_split, opts = args
+    country, extra_name, logger, year, t, time_resolution, yearly_split, opts = args
     return (
         country,
         EnergyAgentClass(
             country=country,
+            extra_name=extra_name,
             logger=logger,
             year=year,
             timeslice=t,
@@ -34,9 +35,10 @@ def build_profile_args(args):
     )
 
 def solve_country_optimization_wrapper(args):
-            (country, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
+            (country, extra_name, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
             energy_country_class = EnergyAgentClass(
                 country=country,
+                extra_name=extra_name,
                 logger=logger,
                 year=year,
                 timeslice=time,
@@ -181,6 +183,7 @@ class EnergyModelClass:
         args_list = [
             (
                 country,
+                self.name,
                 t,
                 year,
                 self.logger,
@@ -227,7 +230,7 @@ class EnergyModelClass:
         self.logger.info(f"Calculating demand profiles for time {t} and year {year}")
 
         args_list = [
-            (country, self.logger, year, t, self.time_resolution, self.yearly_split, self.opts)
+            (country, self.name, self.logger, year, t, self.time_resolution, self.yearly_split, self.opts)
             for country in self.countries
         ]
         with ProcessPoolExecutor(max_workers=min(os.cpu_count(), len(args_list))) as executor:
@@ -246,6 +249,7 @@ class EnergyModelClass:
             delta_demand_map=self.demand_map[time].copy(),
             marginal_costs_df=self.marginal_costs_df[['MC_import', 'MC_export']],
             cost_transmission_line=self.config_parser.get_cost_transmission_line(),
+            cost_threshold=self.config_parser.get_marginal_cost_threshold(),
             logger=self.logger,
             xml_file_path=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{time}/transmission/problems"),
             expansion_enabled=self.config_parser.get_expansion_enabled(),
@@ -341,6 +345,7 @@ class EnergyModelClass:
 
         energy_country_class = EnergyAgentClass(
             country=country,
+            extra_name=self.name,
             logger=logger,
             year=year,
             timeslice=time,

@@ -129,5 +129,11 @@ class ConfigParserClass:
         self.logger.debug("Expansion enabled set in config parser")
         return self.config['outline']['expansion_enabled']
 
-    
+    def get_marginal_cost_threshold(self):
+        """
+        Returns the marginal cost threshold percentage for the model.
+        :return: float
+        """
+        self.logger.debug("Marginal cost threshold percentage set in config parser")
+        return self.config['outline']['marginal_cost_threshold_percentage']
 

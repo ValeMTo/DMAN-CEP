@@ -6,8 +6,9 @@ from snakemake import snakemake
 
 
 class EnergyAgentClass:
-    def __init__(self, country, logger, year, timeslice, index_time, yearly_split, demand, opts):
+    def __init__(self, country, extra_name, logger, year, timeslice, index_time, yearly_split, demand, opts):
         self.name = country
+        self.extra_name = extra_name
         self.logger = logger
         self.year = year
         self.timeslice = timeslice
@@ -29,8 +30,8 @@ class EnergyAgentClass:
                     "enable": {
                         "download_osm_data":"true",
                         "not_from_demand_profiles": "true"
-                    }, 
-                    "run": {"name": self.run_name},
+                    },
+                    "run": {"name": f"{self.run_name}___{self.extra_name}"},
                     "scenario": {"planning_horizons": [self.year]},
                     "snapshots": self.calculate_snapshots(),
                     "costs": {"year": self.year},
@@ -56,7 +57,7 @@ class EnergyAgentClass:
                         #"retrieve_cost_data":"true",
                         "not_from_demand_profiles": "true"
                     }, 
-                    "run": {"name": self.run_name},
+                    "run": {"name": f"{self.run_name}___{self.extra_name}"},
                     "scenario": {"planning_horizons": [self.year]},
                     "snapshots": self.calculate_snapshots(),
                     "load_options": {
@@ -76,7 +77,7 @@ class EnergyAgentClass:
                 config={
                     "countries": [self.name],
                     "enable": {"not_from_demand_profiles": "true"}, 
-                    "run": {"name": self.run_name},
+                    "run": {"name": f"{self.run_name}___{self.extra_name}"},
                     "scenario": {"planning_horizons": [self.year]},
                     "snapshots": self.calculate_snapshots(),
                     "load_options": {
@@ -114,7 +115,7 @@ class EnergyAgentClass:
             dryrun=dryrun,
         )
         if not success:
-            raise RuntimeError("Snakemake run failed.")
+            raise RuntimeError(f"Snakemake run failed for {self.name} in timeslice {self.timeslice}")
         print("✅ Workflow completed successfully.")
 
     def calculate_snapshots(self):
@@ -136,7 +137,7 @@ class EnergyAgentClass:
     
     def get_demand_profile(self):
         self.logger.debug(f"Getting demand profile for {self.name} in year {self.year} and timeslice {self.timeslice}")
-        demand_profiles_path = f"./pypsa_earth/resources/{self.run_name}/demand_profiles.csv"
+        demand_profiles_path = f"./pypsa_earth/resources/{self.run_name}___{self.extra_name}/demand_profiles.csv"
         if not os.path.exists(demand_profiles_path):
             raise FileNotFoundError(f"Demand profiles file {demand_profiles_path} does not exist.")
         df = pd.read_csv(demand_profiles_path, index_col=0)
@@ -145,7 +146,7 @@ class EnergyAgentClass:
 
     def process_results(self):
 
-        solved_network_path = f"./pypsa_earth/results/{self.run_name}/networks/elec_s{self.opts['simpl'][0]}_{self.opts['clusters'][0]}_ec_l{self.opts['ll'][0]}_{self.opts['opts'][0]}.nc"
+        solved_network_path = f"./pypsa_earth/results/{self.run_name}___{self.extra_name}/networks/elec_s{self.opts['simpl'][0]}_{self.opts['clusters'][0]}_ec_l{self.opts['ll'][0]}_{self.opts['opts'][0]}.nc"
         if not os.path.exists(solved_network_path):
             raise FileNotFoundError(f"Network file {solved_network_path} does not exist.")
         
