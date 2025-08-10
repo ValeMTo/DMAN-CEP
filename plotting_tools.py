@@ -209,13 +209,15 @@ def plot_demand_transmission(data, width=1200, height=900):
             exports = exports if not pd.isna(exports) else 0.0
             cost = df.at[country, '0'] if '0' in df.columns else None
             cost_per_unit = cost / total_demand if total_demand and cost is not None else None
+            cost_per_unit_with_exchange = df.at[country, 'total_cost_after_exchange'] / (total_demand + imports) if total_demand and 'total_cost_after_exchange' in df.columns else None
             records.append({
                 'Iteration': try_int(k),
                 'Country': country,
                 'Demand': demand,
                 'Import': imports,
                 'Export': exports,
-                'CostPerUnit': cost_per_unit
+                'CostPerUnit': cost_per_unit,
+                'CostPerUnitWithExchange': cost_per_unit_with_exchange,
             })
 
     df_tx = pd.DataFrame(records)
@@ -265,6 +267,13 @@ def plot_demand_transmission(data, width=1200, height=900):
             mode='lines+markers', name='Cost per Unit',
             line=dict(color='red', dash='solid'),
             showlegend=(i == 0), legendgroup='CostPerUnit'
+        ), row=row, col=col, secondary_y=True)
+
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'], y=subset['CostPerUnitWithExchange'],
+            mode='lines+markers', name='Cost per Unit (with Exchange)',
+            line=dict(color='red', dash='dash'),
+            showlegend=(i == 0), legendgroup='CostPerUnitWithExchange'
         ), row=row, col=col, secondary_y=True)
 
     fig.update_layout(
@@ -358,7 +367,7 @@ def analyze_transmission_symmetry(width, height, timeslice_data, title_prefix="T
 
 
 
-def plot_mc_and_marginals(data_dict, width=1600, height=900):
+def plot_mc_and_marginals(data_dict, width=1600, height=900, exchange_cost=True):
     """
     Plot marginal cost of import/export and marginal demand per country over iterations.
     
@@ -373,6 +382,12 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
             return int(x)
         except Exception:
             return x
+    
+    cost_column = "0"
+    cost_name = "Cost"
+    if exchange_cost:
+        cost_column = "total_cost_after_exchange"
+        cost_name = "Cost + Exchange"
 
     iterations = sorted(data_dict.keys(), key=try_int)
     
@@ -386,7 +401,7 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
             record = {
                 'Iteration': try_int(k),
                 'Country': country,
-                'Cost': df.loc[country, '0'] if '0' in df.columns else None,
+                cost_name: df.loc[country, cost_column] if cost_column in df.columns else None,
                 'MC_import': df.loc[country, 'MC_import'] if 'MC_import' in df.columns else None,
                 'MC_export': df.loc[country, 'MC_export'] if 'MC_export' in df.columns else None,
                 'MarginalDemand': df.loc[country, 'marginal_demand'] if 'marginal_demand' in df.columns else None
@@ -414,9 +429,9 @@ def plot_mc_and_marginals(data_dict, width=1600, height=900):
 
         # Cost line
         fig.add_trace(go.Scatter(
-            x=subset['Iteration'], y=subset['Cost'],
-            mode='lines+markers', name='Cost',
-            legendgroup='Cost', showlegend=(i == 0),
+            x=subset['Iteration'], y=subset[cost_name],
+            mode='lines+markers', name=cost_name,
+            legendgroup=cost_name, showlegend=(i == 0),
             line=dict(color='black')
         ), row=row, col=col, secondary_y=False)
 
@@ -476,10 +491,12 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
         df = data_dict[k]['df']
         for country in df.index:
             cost = df.loc[country, '0'] if '0' in df.columns else None
+            cost_with_exchange = df.loc[country, 'total_cost_after_exchange'] if 'total_cost_after_exchange' in df.columns else None
             records.append({
                 'Iteration': try_int(k),
                 'Country': country,
-                'Cost': cost
+                'Cost': cost,
+                'CostWithExchange': cost_with_exchange,
             })
 
     df_all = pd.DataFrame(records)
@@ -489,10 +506,10 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
     df_all['CostDelta'] = df_all.groupby('Country')['Cost'].diff()
 
     # Compute total cost and its delta per iteration
-    total_cost = df_all.groupby('Iteration')['Cost'].sum().reset_index()
+    total_cost = df_all.groupby('Iteration')['CostWithExchange'].sum().reset_index()
     total_cost['Country'] = 'Total'
     total_cost = total_cost.sort_values('Iteration')
-    total_cost['CostDelta'] = total_cost['Cost'].diff()
+    total_cost['CostDelta'] = total_cost['CostWithExchange'].diff()
 
     # Combine for plotting
     df_plot = pd.concat([df_all, total_cost], ignore_index=True)
@@ -518,6 +535,15 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
             legendgroup=country,
             showlegend=True if country != 'Total' else False,
             line=dict(width=2)
+        ), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=subset['Iteration'],
+            y=subset['CostWithExchange'],
+            mode='lines+markers',
+            name=f"{country} CostWithExchange",
+            legendgroup=country,
+            showlegend=True if country != 'Total' else False,
+            line=dict(width=2, dash='dash')
         ), row=1, col=1)
     # Add 'Total' to legend
     subset = df_plot[df_plot['Country'] == 'Total']
