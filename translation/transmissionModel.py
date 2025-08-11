@@ -125,7 +125,7 @@ class TransmissionAgentClass:
                         start_country=row['end_country'],
                         end_country=row['start_country'],
                         capacity=row['capacity'],
-                        price=round((self.MC_import) * (1 + self.cost_percentage_threshold) + self.transmission_cost, 2)
+                        price=round((self.MC_import) * (1 + self.cost_percentage_threshold), 2)
                     )
                     self.outbox.append(bid)
         return self.outbox
@@ -164,11 +164,11 @@ class TransmissionAgentClass:
         # Gather all bids: incoming (inbox) and outgoing (outbox)
         all_bids = []
         for bid in self.inbox:
-            utility = (bid.price - self.MC_export) * bid.capacity
+            utility = (bid.price + self.transmission_cost - self.MC_export * (1 + self.cost_percentage_threshold)) * bid.capacity
             all_bids.append((utility, 'exporter', bid))
             self.logger.debug(f"Bid from {bid.sender} to {bid.end_country} with utility {utility} as exporter")
         for bid in self.outbox:
-            utility = (bid.price - bid.MC_exporter * (1 + self.cost_percentage_threshold)) * bid.capacity
+            utility = (bid.price + self.transmission_cost - bid.MC_exporter * (1 + self.cost_percentage_threshold)) * bid.capacity
             all_bids.append((utility, 'importer', bid))
             self.logger.debug(f"Bid from {self.country} to {bid.end_country} with utility {utility} as importer")
 
