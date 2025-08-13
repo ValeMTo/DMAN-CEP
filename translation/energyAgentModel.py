@@ -2,11 +2,12 @@ import pandas as pd
 import os
 from datetime import datetime, timedelta
 import pypsa
+import re
 from snakemake import snakemake
 
 
 class EnergyAgentClass:
-    def __init__(self, country, extra_name, logger, year, timeslice, index_time, yearly_split, demand, opts):
+    def __init__(self, country, extra_name, logger, year, timeslice, index_time, yearly_split, demand, opts, original_demand, config):
         self.name = country
         self.extra_name = extra_name
         self.logger = logger
@@ -16,6 +17,8 @@ class EnergyAgentClass:
         self.yearly_split = yearly_split
         self.demand = demand
         self.opts = opts
+        self.original_demand = original_demand
+        self.config = config
         self.logger.debug(f"EnergyAgentClass initialized for {country}")
 
         self.run_name = f"{self.year}_{self.timeslice}_{self.name}"
@@ -43,14 +46,29 @@ class EnergyAgentClass:
         )
 
         return self.get_demand_profile()
+    
+    def adjust_emission_cap(self):
+        if 'eletricity' in self.config:
+            if 'co2limit' in self.config['eletricity']:
+                self.config['eletricity']['co2limit'] *= self.demand / self.original_demand  # Adjust cap by demand ratio
+                return 
+            if 'automatic_emission_base_year' in self.config['eletricity']:
+                new_opts = []
+                for o in self.config['scenario']['opts']:
+                    if 'Co2L' in o:
+                        m = re.findall(r"Co2L([0-9]*\.?[0-9]+)", o)
+                        o = f"Co2L{float(m[0]) * self.demand / self.original_demand}"
+                    new_opts.append(o)
+                self.config['scenario']['opts'] = new_opts
+                self.opts['opts'] = new_opts
 
     def solve(self, scale, complete=True):
-
+        self.adjust_emission_cap()
         if complete:
             self.run_pypsa_snakemake(
                 work_dir=f"./pypsa_earth",
                 targets=["solve_all_networks"],
-                config={
+                config=self.merge_configs({
                     "countries": [self.name],
                     "enable": {
                         "download_osm_data":"true",
@@ -66,7 +84,7 @@ class EnergyAgentClass:
                     #"costs": {"year": self.year},
                     "convergence_factor": scale,  
                     "demand": self.demand,  # Exchange value for the agent
-                },
+                },self.config),
                 cores=1,
                 dryrun=False,
             )
@@ -74,7 +92,7 @@ class EnergyAgentClass:
             self.run_pypsa_snakemake(
                 work_dir=f"./pypsa_earth",
                 targets=["solve_all_networks"],
-                config={
+                config=self.merge_configs({
                     "countries": [self.name],
                     "enable": {"not_from_demand_profiles": "true"}, 
                     "run": {"name": f"{self.run_name}___{self.extra_name}"},
@@ -86,7 +104,7 @@ class EnergyAgentClass:
                     #"costs": {"year": self.year},
                     "convergence_factor": scale,  
                     "demand": self.demand,  # Demand value for the agent
-                },
+                }, self.config),
                 cores=1,
                 dryrun=False,
             )
@@ -118,6 +136,11 @@ class EnergyAgentClass:
             raise RuntimeError(f"Snakemake run failed for {self.name} in timeslice {self.timeslice}")
         print("✅ Workflow completed successfully.")
 
+    def merge_configs(self, config1, config2):
+        merged = config1.copy()
+        merged.update(config2)
+        return merged
+
     def calculate_snapshots(self):
         self.logger.debug(f"Calculating snapshots for {self.name} in year {self.year} and timeslice {self.timeslice}")
 
@@ -134,15 +157,15 @@ class EnergyAgentClass:
             "start": start_date.strftime("%Y-%m-%d"),
             "end": end_date.strftime("%Y-%m-%d"),
         }
-    
+
     def get_demand_profile(self):
         self.logger.debug(f"Getting demand profile for {self.name} in year {self.year} and timeslice {self.timeslice}")
         demand_profiles_path = f"./pypsa_earth/resources/{self.run_name}___{self.extra_name}/demand_profiles.csv"
         if not os.path.exists(demand_profiles_path):
             raise FileNotFoundError(f"Demand profiles file {demand_profiles_path} does not exist.")
         df = pd.read_csv(demand_profiles_path, index_col=0)
-        total_demand = df.sum().sum()
-        return total_demand
+        original_demand = df.sum().sum()
+        return original_demand
 
     def process_results(self):
 

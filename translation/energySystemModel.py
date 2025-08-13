@@ -31,11 +31,13 @@ def build_profile_args(args):
             yearly_split=yearly_split,
             demand=None,
             opts=opts,
+            original_demand=None,
+            config=None,
         ).build_demand_profile()
     )
 
 def solve_country_optimization_wrapper(args):
-            (country, extra_name, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization) = args
+            (country, extra_name, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization, original_demand, config) = args
             energy_country_class = EnergyAgentClass(
                 country=country,
                 extra_name=extra_name,
@@ -46,6 +48,8 @@ def solve_country_optimization_wrapper(args):
                 yearly_split=yearly_split,
                 demand=demand,
                 opts=opts,
+                original_demand=original_demand,
+                config=config,
             )
             # This is a placeholder; you may need to adapt how results are stored/returned
             return (
@@ -69,6 +73,7 @@ class EnergyModelClass:
         self.config_parser.set_output_file_path(output_path)
 
         self.countries = self.config_parser.get_countries()
+        self.country_config = self.config_parser.get_model_configuration_per_country()
         self.name = self.config_parser.get_problem_name()
         self.time_resolution = self.config_parser.get_annual_time_resolution()
         self.years = self.config_parser.get_years()
@@ -92,7 +97,6 @@ class EnergyModelClass:
 
         self.convergence_iteration = 0
         self.logger.info("Energy model initialized")
-
 
     def get_model_options(self):
         with open('pypsa_earth/config.yaml', 'r') as f:
@@ -126,6 +130,7 @@ class EnergyModelClass:
             demand_map[t] = {}
             for c in self.countries:
                 demand_map[t][c] = {
+                    'original_demand': None,
                     'demand': None,
                 }
         self.demand_map = demand_map
@@ -193,7 +198,9 @@ class EnergyModelClass:
                 self.demand_map[t][country]['demand'],
                 self.opts,
                 self.delta_marginal_cost,
-                self.first_optimization[country]
+                self.first_optimization[country],
+                self.demand_map[t][country]['original_demand'],
+                self.country_config[country]
             )
             for country in self.countries
         ]
@@ -238,6 +245,7 @@ class EnergyModelClass:
             futures = {executor.submit(build_profile_args, args): args[0] for args in args_list}
             for future in as_completed(futures):
                 country, profile = future.result()
+                self.demand_map[t][country]['original_demand'] = profile
                 self.demand_map[t][country]['demand'] = profile
                 self.demand_map[t][country]['marginal_demand'] = profile * self.delta_marginal_cost
 
@@ -341,23 +349,5 @@ class EnergyModelClass:
 
         if self.config_parser.get_expansion_enabled():
             raise NotImplementedError("Expansion is not implemented yet.")
-
-    def solve_country_optimization(self, country, time, year, logger, index_time, yearly_split, demand, opts, delta_marginal_cost, first_optimization):
-
-        energy_country_class = EnergyAgentClass(
-            country=country,
-            extra_name=self.name,
-            logger=logger,
-            year=year,
-            timeslice=time,
-            index_time=index_time,
-            yearly_split=yearly_split,
-            demand=demand,
-            opts=opts,
-        )
-        self.reader.store(*energy_country_class.solve(scale=1.0 + delta_marginal_cost, complete= not first_optimization), demand_type='+', country=country)
-        self.reader.store(*energy_country_class.solve(scale=1.0 - delta_marginal_cost, complete=False), demand_type='-', country=country)
-        self.reader.store(*energy_country_class.solve(scale=1.0, complete=False), demand_type='0', country=country)
-        self.first_optimization[country] = True
         
 

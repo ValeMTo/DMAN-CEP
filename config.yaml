@@ -2,8 +2,7 @@ config:
   logging:
     file: ./logs/app.log
     level: DEBUG
-  name: SAPP
-  name: SAPP-v3
+  name: test-v3
   outline:
     countries:
     - AO
@@ -20,19 +19,16 @@ config:
     - ZW
     years:
     - 2030
-    data_file_path: ./osemosys_data/input_data_original/TEMBA_SSP4-60.xlsx
-    fuel_code_file_path: ./osemosys_data/fuelcodes(in).csv
-    tech_code_file_path: ./osemosys_data/techcodes(in).csv
     representation_per_year: ['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9', 'M10', 'M11', 'M12'] # Representations inside an year
     timeout_time_step: 180 # seconds
     steps_rate_activity: 300
-    missing_computation: True
     max_iterations: 50
     min_convergence_iterations: 5
     delta_marginal_cost: 0.20
     marginal_cost_tolerance: 10
     expansion_enabled: False
     cost_transmission_line: 0
+    marginal_cost_threshold_percentage: 0.05 #It will double
     domains: 
       capacity: 
           min: 0
@@ -42,4 +38,60 @@ config:
           min: -20000
           max: 20000
           step: 200
-  output_file_path: solutions/SAPP-v3-0.2
+  output_file_path: solutions/test-v3-0.2
+  
+  inner_model_configuration:
+    AO: 
+      scenario:
+        opts: [Co2L0.9079-6H] #-9.21
+
+      eletricity:
+        automatic_emission: true
+        automatic_emission_base_year: 2015
+    BW:
+      scenario:
+        opts: [Co2L0.85-6H] #-15%
+
+      eletricity:
+        automatic_emission: true
+        automatic_emission_base_year: 2010
+    CD:
+      eletricity:
+        co2limit: 1.4e+7 #t CO2eq.
+    LS:
+      eletricity:
+        co2limit: 1e+12 #Infinity
+    MW:
+      eletricity:
+        co2limit: 1e+12 #Infinity
+    MZ:
+      eletricity:
+        co2limit: 1e+12 #Infinity
+    NA:
+      eletricity:
+        operational_reserve:
+          activate: true
+          epsilon_vres: 0.95
+    SZ:
+      eletricity:
+        operational_reserve:
+          activate: true
+          epsilon_vres: 0.50
+    TZ:
+      eletricity:
+        co2limit: 2.8531e+6 #t CO2eq.
+    ZA:
+      eletricity:
+        co2limit: 3.15e+8 #t CO2eq.
+    ZM:
+      scenario:
+        opts: [Co2L0.53-6H] #-47%
+
+      eletricity:
+        automatic_emission: true
+        automatic_emission_base_year: 2010
+    ZW:
+      eletricity:
+        co2limit: 1.3385e+7 #t CO2eq.
+
+

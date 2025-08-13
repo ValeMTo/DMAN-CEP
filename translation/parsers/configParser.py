@@ -10,6 +10,9 @@ class ConfigParserClass:
         except FileNotFoundError:
             raise FileNotFoundError(f"File {file_path} not found")
         
+    def get_model_configuration_per_country(self):
+        return self.config['inner_model_configuration']
+
     def get_file_path(self):
         return self.config['outline']['data_file_path']
     
