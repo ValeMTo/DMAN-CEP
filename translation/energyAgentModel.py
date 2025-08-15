@@ -41,7 +41,7 @@ class EnergyAgentClass:
                     "convergence_factor": 1.0,  
                     "demand": None,  # Exchange value for the agent
                 },
-            cores=1,
+            cores=4,
             dryrun=False,
         )
 
@@ -85,7 +85,7 @@ class EnergyAgentClass:
                     "convergence_factor": scale,  
                     "demand": self.demand,  # Exchange value for the agent
                 },self.config),
-                cores=1,
+                cores=4,
                 dryrun=False,
             )
         else:
@@ -105,7 +105,7 @@ class EnergyAgentClass:
                     "convergence_factor": scale,  
                     "demand": self.demand,  # Demand value for the agent
                 }, self.config),
-                cores=1,
+                cores=4,
                 dryrun=False,
             )
 

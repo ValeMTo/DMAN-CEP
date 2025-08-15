@@ -16,6 +16,7 @@ from collections import defaultdict
 from threading import Thread
 import yaml
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import pickle
 
 def build_profile_args(args):
     country, extra_name, logger, year, t, time_resolution, yearly_split, opts = args
@@ -59,44 +60,48 @@ def solve_country_optimization_wrapper(args):
                 energy_country_class.solve(scale=1.0, complete=False)
             )
 class EnergyModelClass:
-    def __init__(self):
-        self.config_parser = ConfigParserClass(file_path='config.yaml')
-        self.logger = self.create_logger(*self.config_parser.get_log_info())
-        self.config_parser.set_logger(self.logger)
+    def __init__(self, reload = False):
+        if not reload:
+            self.config_parser = ConfigParserClass(file_path='config.yaml')
+            self.logger = self.create_logger(*self.config_parser.get_log_info())
+            self.config_parser.set_logger(self.logger)
 
-        base_output_path = self.config_parser.get_output_file_path()
-        output_path = base_output_path
-        k = 1
-        while os.path.exists(output_path):
-            output_path = f"{base_output_path}+{k}"
-            k += 1
-        self.config_parser.set_output_file_path(output_path)
+            base_output_path = self.config_parser.get_output_file_path()
+            self.output_path = base_output_path
+            k = 1
+            while os.path.exists(self.output_path):
+                self.output_path = f"{base_output_path}+{k}"
+                k += 1
+            self.config_parser.set_output_file_path(self.output_path)
 
-        self.countries = self.config_parser.get_countries()
-        self.country_config = self.config_parser.get_model_configuration_per_country()
-        self.name = self.config_parser.get_problem_name()
-        self.time_resolution = self.config_parser.get_annual_time_resolution()
-        self.years = self.config_parser.get_years()
-        self.opts = self.get_model_options()
+            self.countries = self.config_parser.get_countries()
+            self.country_config = self.config_parser.get_model_configuration_per_country()
+            self.name = self.config_parser.get_problem_name()
+            self.time_resolution = self.config_parser.get_annual_time_resolution()
+            self.years = self.config_parser.get_years()
+            self.opts = self.get_model_options()
 
-        self.results_df = None
-        self.marginal_costs_df = None
-        self.country_data_per_time = {}
+            self.results_df = None
+            self.marginal_costs_df = None
+            self.country_data_per_time = {}
 
-        self.data_parser = dataParserClass(logger=self.logger)
+            self.data_parser = dataParserClass(logger=self.logger)
 
-        self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries, yearly=True)
-        self.transmission_data_max_capacity = self.transmission_data_capacity.copy()
-        self.transmission_data = pd.DataFrame()
-        self.yearly_split = self.build_yearly_split_map()
-        self.demand_map = {}
+            self.transmission_data_capacity = self.data_parser.get_transmission_data(self.countries, yearly=True)
+            self.transmission_data_max_capacity = self.transmission_data_capacity.copy()
+            self.transmission_data = pd.DataFrame()
+            self.yearly_split = self.build_yearly_split_map()
+            self.demand_map = {}
 
-        self.max_iteration = self.config_parser.get_max_iteration()
-        self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
-        self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
+            self.max_iteration = self.config_parser.get_max_iteration()
+            self.delta_marginal_cost = self.config_parser.get_delta_marginal_cost()
+            self.marginal_cost_tolerance = self.config_parser.get_marginal_cost_tolerance()
 
-        self.convergence_iteration = 0
-        self.logger.info("Energy model initialized")
+            self.convergence_iteration = 0
+            self.year_pos = 0
+            self.t_pos = 0
+            self.k_pos = 0
+            self.logger.info("Energy model initialized")
 
     def get_model_options(self):
         with open('pypsa_earth/config.yaml', 'r') as f:
@@ -137,29 +142,35 @@ class EnergyModelClass:
 
     def solve(self):
         self.logger.info("Solving the energy model")
-        for year in self.years:
-            self.solve_year(year)
+        for self.year_pos in range(self.year_pos, len(self.years)):
+            self.solve_year(self.years[self.year_pos])
         self.logger.info("Energy model solved")
         #self.results_df.to_csv(os.path.join(self.config_parser.get_output_file_path(), 'results.csv'), index=False)
     
     def solve_year(self, year):
         self.logger.info(f"Solving the energy model for {year}")
         self.build_demand_map()
-        for t in tqdm(self.time_resolution, desc=f"Solving year {year}"):
+        for self.t_pos in tqdm(range(self.t_pos, len(self.time_resolution)), desc=f"Solving year {year}"):
+            t = self.time_resolution[self.t_pos]
             self.calculate_demand_profiles(t, year)
             self.first_optimization = {country: False for country in self.countries}
-            for k in tqdm(range(self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
-                self.reader = self.prepare_reader(k=k, t=t, year=year)
+            for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
+                self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
                 marginal_costs_df = self.solve_internal_problem(t, year)
                 if self.check_convergence(marginal_costs_df):
-                    self.logger.info(f"Convergence reached for time {t} and year {year} after {k} iterations")
+                    self.logger.info(f"Convergence reached for time {t} and year {year} after {self.k_pos} iterations")
                     self.solve_transmission_problem(t, year)
                     self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
+                    status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
                     break
                 self.solve_transmission_problem(t, year)
                 self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
+                # Save the status of the class to a file for recovery
+                status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
+                with open(status_file, "wb") as f:
+                    pickle.dump(self, f)
             #self.update_data(t, year)
-            if k == self.max_iteration:
+            if self.k_pos == self.max_iteration:
                 self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
             marginal_costs_df = None
             self.reset()
@@ -167,6 +178,7 @@ class EnergyModelClass:
     def reset(self):
         self.transmission_data_max_capacity = self.transmission_data_capacity.copy()  # Reset transmission data for the next time slice
         self.transmission_data = pd.DataFrame() # Reset transmission data for the next time slice
+        self.k_pos = 0
 
     def prepare_reader(self, k, t, year):
         self.logger.debug(f"Preparing XML reader for iteration {k}, time {t}, year {year}")
