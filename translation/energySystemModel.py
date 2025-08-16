@@ -152,7 +152,8 @@ class EnergyModelClass:
         self.build_demand_map()
         for self.t_pos in tqdm(range(self.t_pos, len(self.time_resolution)), desc=f"Solving year {year}"):
             t = self.time_resolution[self.t_pos]
-            self.calculate_demand_profiles(t, year)
+            if self.k_pos == 0:
+                self.calculate_demand_profiles(t, year)
             self.first_optimization = {country: False for country in self.countries}
             for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
                 self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
