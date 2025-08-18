@@ -146,9 +146,9 @@ class EnergyAgentClass:
 
         days = 365 * self.yearly_split
 
-        start_date = datetime(2013, 1, 1)
-        start_date += timedelta(days=round(days * self.index_time))
-        end_date = start_date + timedelta(days=round(days*(self.index_time+1)))
+        first_start_date = datetime(2013, 1, 1)
+        start_date = first_start_date + timedelta(days=round(days * self.index_time))
+        end_date = first_start_date + timedelta(days=round(days*(self.index_time+1)))
         # Cap the end date at 2014-01-01
         if end_date > datetime(2014, 1, 1):
             end_date = datetime(2014, 1, 1)
