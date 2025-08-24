@@ -2,6 +2,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import re
 import plotly.express as px
 import plotly.colors
 
@@ -204,7 +205,7 @@ def plot_demand_transmission(data, width=1200, height=900):
             demand = df.at[country, f'demand_0'] if f'demand_0' in df.columns else 0.0
             imports = -tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] < 0), 'exchange'].sum()
             exports = tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] > 0), 'exchange'].sum()
-            total_demand = demand + exports
+            total_demand = demand
             imports = imports if not pd.isna(imports) else 0.0
             exports = exports if not pd.isna(exports) else 0.0
             cost = df.at[country, '0'] if '0' in df.columns else None
@@ -285,6 +286,8 @@ def plot_demand_transmission(data, width=1200, height=900):
     fig.update_yaxes(title_text="Energy", secondary_y=False)
     fig.update_yaxes(title_text="Cost per Unit", secondary_y=True)
     fig.show()
+
+    return df_tx
 
 def analyze_transmission_symmetry(width, height, timeslice_data, title_prefix="Transmission Flow"):
     """
@@ -590,7 +593,114 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
     fig.update_yaxes(title_text="ΔCost (Change)", row=2, col=1)
     fig.show()
 
-def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
+def plot_demand_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
+    """
+    Plot demand_0, imports, and exports across timeslices using only the last iteration per timeslice.
+    Exports are stacked on top of demand with a pattern, imports are stacked on top of demand in green.
+
+    Parameters:
+    - timeslice_dict_by_year: dataframes[year], i.e., dict of {timeslice: {k: {'df': ..., ...}}}
+    - width, height: figure dimensions
+    """
+
+    def timeslice_sort_key(ts):
+        match = re.match(r"[MW](\d+)", str(ts))
+        return int(match.group(1)) if match else ts
+
+    records = []
+
+    for timeslice, iterations in timeslice_dict_by_year.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+        df = iterations[last_k]['df']
+        tdf = iterations[last_k].get('transmission_df', pd.DataFrame())
+
+        for country in df.index:
+            demand_0 = df.loc[country, 'demand_0'] 
+            # Imports: sum of negative exchanges where end_country == country
+            imports = -tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] < 0), 'exchange'].sum() if not tdf.empty else 0.0
+            # Exports: sum of positive exchanges where start_country == country
+            exports = tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] > 0), 'exchange'].sum() if not tdf.empty else 0.0
+            imports = imports if not pd.isna(imports) else 0.0
+            exports = exports if not pd.isna(exports) else 0.0
+            records.append({
+                'Timeslice': timeslice,
+                'Country': country,
+                'Demand': demand_0,
+                'Import': imports,
+                'Export': exports
+            })
+
+    df_all = pd.DataFrame(records)
+    df_all['Timeslice'] = pd.Categorical(
+        df_all['Timeslice'],
+        categories=sorted(df_all['Timeslice'].unique(), key=timeslice_sort_key),
+        ordered=True
+    )
+    countries = df_all['Country'].unique()
+    cols = 4
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_all[df_all['Country'] == country].sort_values('Timeslice')
+
+        # Calculate export portions
+
+        # Demand bar (full demand)
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['Demand'],
+            name='Demand',
+            marker_color='blue',
+            legendgroup='Demand', showlegend=(i == 0),
+            offsetgroup='demand',
+            base=0
+        ), row=row, col=col)
+
+        # Import stacked on top of demand, in green
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['Import'],
+            name='Import',
+            marker_color='green',
+            legendgroup='Import', showlegend=(i == 0),
+            offsetgroup='import',
+            base=subset['Demand']
+        ), row=row, col=col)
+
+        # Overlay export portion (patterned blue) up to demand
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['Export'],
+            name='Export (in Demand)',
+            marker=dict(color='rgba(0,0,255,0.2)', pattern=dict(shape='\\')),
+            legendgroup='Export', showlegend=(i == 0),
+            offsetgroup='export',
+            base=0,
+            opacity=0.7
+        ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Final Iteration Demand, Export (patterned), and Import (green) per Timeslice and Country",
+        barmode='stack',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="Demand / Import / Export")
+    fig.show()
+
+    return df_all
+
+def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, height=900, cost_name='0'):
     """
     Plot cost, marginal values and MCs across timeslices using only the last iteration per timeslice.
     
@@ -598,19 +708,25 @@ def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, h
     - timeslice_dict_by_year: dataframes[year], i.e., dict of {timeslice: {k: {'df': ..., ...}}}
     - width, height: figure dimensions
     """
+
+    def timeslice_sort_key(ts):
+        # Extract numeric part after 'm' or 'w' (e.g., m1 -> 1, w2 -> 2, m10 -> 10)
+        match = re.match(r"[MW](\d+)", str(ts))
+        return int(match.group(1)) if match else ts
+
     records = []
 
     for timeslice, iterations in timeslice_dict_by_year.items():
         if not iterations:
             continue
-        last_k = max(iterations.keys())
+        last_k = max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
         df = iterations[last_k]['df']
 
         for country in df.index:
             records.append({
                 'Timeslice': timeslice,
                 'Country': country,
-                'Cost': df.loc[country, '0'],
+                'Cost': df.loc[country, cost_name],
                 'MarginalDemand': df.loc[country, 'marginal_demand'],
                 'CostPerUnit': df.loc[country, 'cost_per_unit'],
                 'MC_import': df.loc[country, 'MC_import'],
@@ -618,6 +734,12 @@ def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, h
             })
 
     df_all = pd.DataFrame(records)
+    # Sort timeslices numerically
+    df_all['Timeslice'] = pd.Categorical(
+        df_all['Timeslice'],
+        categories=sorted(df_all['Timeslice'].unique(), key=timeslice_sort_key),
+        ordered=True
+    )
     countries = df_all['Country'].unique()
     cols = 4
     rows = (len(countries) + cols - 1) // cols
@@ -687,6 +809,90 @@ def plot_country_results_across_timeslices(timeslice_dict_by_year, width=1600, h
 
     fig.show()
 
+def plot_cost_difference_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
+    """
+    Plot the difference between cost '0' and 'total_cost_after_exchange' across timeslices for each country.
+
+    Parameters:
+    - timeslice_dict_by_year: dict of {timeslice: {k: {'df': ...}}}
+    - width, height: figure dimensions
+    """
+    def timeslice_sort_key(ts):
+        match = re.match(r"[MW](\d+)", str(ts))
+        return int(match.group(1)) if match else ts
+
+    records = []
+    for timeslice, iterations in timeslice_dict_by_year.items():
+        if not iterations:
+            continue
+        last_k =  max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+        df = iterations[last_k]['df']
+        for country in df.index:
+            cost_0 = df.loc[country, '0'] if '0' in df.columns else None
+            cost_ex = df.loc[country, 'total_cost_after_exchange'] if 'total_cost_after_exchange' in df.columns else None
+            diff = cost_ex - cost_0 if cost_0 is not None and cost_ex is not None else None
+            records.append({
+                'Timeslice': timeslice,
+                'Country': country,
+                'Cost_0': cost_0,
+                'CostAfterExchange': cost_ex,
+                'CostDifference': diff
+            })
+
+    df_all = pd.DataFrame(records)
+    df_all['Timeslice'] = pd.Categorical(
+        df_all['Timeslice'],
+        categories=sorted(df_all['Timeslice'].unique(), key=timeslice_sort_key),
+        ordered=True
+    )
+    countries = df_all['Country'].unique()
+    cols = 4
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=False,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{"secondary_y": True} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_all[df_all['Country'] == country].sort_values('Timeslice')
+
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['Cost_0'],
+            name='Cost 0',
+            marker_color='blue',
+            legendgroup='Cost 0', showlegend=(i == 0),
+        ), row=row, col=col, secondary_y=False)
+
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['CostAfterExchange'],
+            name='Cost After Exchange',
+            marker_color='orange',
+            legendgroup='Cost After Exchange', showlegend=(i == 0),
+        ), row=row, col=col, secondary_y=False)
+
+        fig.add_trace(go.Scatter(
+            x=subset['Timeslice'], y=subset['CostDifference'],
+            mode='markers+lines', name='Cost Difference',
+            marker=dict(color='red', symbol='circle'), line=dict(dash='dash'),
+            legendgroup='Cost Difference', showlegend=(i == 0)
+        ), row=row, col=col, secondary_y=True)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Cost 0, Cost After Exchange, and Their Difference per Timeslice and Country",
+        barmode='group',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+    )
+    fig.update_yaxes(title_text="Cost", secondary_y=False)
+    fig.update_yaxes(title_text="Cost Difference", secondary_y=True)
+    fig.show()
+
 def plot_annual_capacity_per_technology(data_dict, width=1000, height=700):
     """
     Plot installed capacity (max per year) per technology and country.
@@ -703,7 +909,7 @@ def plot_annual_capacity_per_technology(data_dict, width=1000, height=700):
     for timeslice, iterations in data_dict.items():
         if not iterations:
             continue
-        last_k = max(iterations.keys())
+        last_k =  max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
         tech_df = iterations[last_k].get('tech_df')
         if tech_df is None or tech_df.empty:
             continue
@@ -784,7 +990,7 @@ def plot_annual_new_installed_per_technology(data_dict, width=1000, height=700):
     for timeslice, iterations in data_dict.items():
         if not iterations:
             continue
-        last_k = max(iterations.keys())
+        last_k =  max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
         tech_df = iterations[last_k].get('tech_df')
         if tech_df is None or tech_df.empty:
             continue
@@ -867,7 +1073,7 @@ def plot_annual_activity_stacked(data_dict, width=1200, height=800):
     for timeslice, iterations in data_dict.items():
         if not iterations:
             continue
-        last_k = max(iterations.keys())
+        last_k =  max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
         tech_df = iterations[last_k].get('tech_df')
         if tech_df is None or tech_df.empty:
             continue
