@@ -130,15 +130,16 @@ class EnergyModelClass:
 
     def build_demand_map(self):
         self.logger.info("Building demand map")
-        demand_map = {}
-        for t in self.time_resolution:
-            demand_map[t] = {}
-            for c in self.countries:
-                demand_map[t][c] = {
-                    'original_demand': None,
-                    'demand': None,
-                }
-        self.demand_map = demand_map
+        if self.k_pos == 0 and self.t_pos == 0:
+            demand_map = {}
+            for t in self.time_resolution:
+                demand_map[t] = {}
+                for c in self.countries:
+                    demand_map[t][c] = {
+                        'original_demand': None,
+                        'demand': None,
+                    }
+            self.demand_map = demand_map
 
     def solve(self):
         self.logger.info("Solving the energy model")
@@ -151,6 +152,7 @@ class EnergyModelClass:
         self.logger.info(f"Solving the energy model for {year}")
         self.build_demand_map()
         for self.t_pos in tqdm(range(self.t_pos, len(self.time_resolution)), desc=f"Solving year {year}"):
+            no_transmission_flag = False
             t = self.time_resolution[self.t_pos]
             if self.k_pos == 0:
                 self.calculate_demand_profiles(t, year)
@@ -158,13 +160,13 @@ class EnergyModelClass:
             for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
                 self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
                 marginal_costs_df = self.solve_internal_problem(t, year)
-                if self.check_convergence(marginal_costs_df):
+                if self.check_convergence(marginal_costs_df, no_transmission_flag):
                     self.logger.info(f"Convergence reached for time {t} and year {year} after {self.k_pos} iterations")
                     self.solve_transmission_problem(t, year)
                     self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
                     status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
                     break
-                self.solve_transmission_problem(t, year)
+                no_transmission_flag = self.solve_transmission_problem(t, year)
                 self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
                 # Save the status of the class to a file for recovery
                 status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
@@ -278,18 +280,19 @@ class EnergyModelClass:
         )
 
         self.reader.set_transmission_outputs(transmission_solver.solve())
-        self.update_demand(time)
+        no_transmission_flag = self.update_demand(time)
         self.logger.debug(f"Transmission problem solved for time {time}")
+        return no_transmission_flag
 
-    def check_convergence(self, marginal_costs_df):
+    def check_convergence(self, marginal_costs_df, no_transmission_flag):
         self.logger.info("Checking convergence of marginal costs")
         if self.marginal_costs_df is None:
             self.marginal_costs_df = marginal_costs_df
             return False
         distance = (self.marginal_costs_df[['MC_import', 'MC_export']] - marginal_costs_df[['MC_import', 'MC_export']]).abs().max().max() 
         self.logger.debug(f"Maximum Distance between marginal costs: {distance}")
-        if distance < self.marginal_cost_tolerance:
-            self.logger.info(f"Convergence reached with distance {distance} < tolerance {self.marginal_cost_tolerance}")
+        if distance < self.marginal_cost_tolerance or no_transmission_flag:
+            self.logger.info(f"Convergence reached with distance {distance} < tolerance {self.marginal_cost_tolerance} or no transmission flag {no_transmission_flag}")
             if self.convergence_iteration < self.config_parser.get_min_convergence_iterations():
                 self.convergence_iteration += 1
                 self.marginal_costs_df = marginal_costs_df
@@ -320,6 +323,9 @@ class EnergyModelClass:
                         (self.transmission_data_max_capacity['end_country'] == end_country), 
                         'capacity'
                     ] -= abs(exchange)
+        else: 
+            return True
+        
         if self.transmission_data.empty and not transmission_outputs.empty:
             self.transmission_data = transmission_outputs
         else:
@@ -327,6 +333,7 @@ class EnergyModelClass:
                 self.transmission_data = pd.concat([self.transmission_data, transmission_outputs], ignore_index=True)
                 self.transmission_data = self.transmission_data.groupby(['start_country', 'end_country'], as_index=False).sum()
                 self.logger.info("Exchange updated based on transmission problem results")
+        return False
 
 
     def update_data(self, t, year):
