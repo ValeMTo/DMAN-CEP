@@ -12,8 +12,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         status_file = sys.argv[1]
 
-    status_file = "./solutions/SAPP-weekly-emissions-10flex-0.2-v3+1/model_status.pkl"
-
     if status_file and os.path.exists(status_file):
         with open(status_file, "rb") as f:
             status = pickle.load(f)
