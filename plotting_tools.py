@@ -593,6 +593,86 @@ def plot_total_cost_variation_over_time(data_dict, width=1200, height=700):
     fig.update_yaxes(title_text="ΔCost (Change)", row=2, col=1)
     fig.show()
 
+def plot_net_demand_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
+    """
+    Plot a single histogram per country across timeslices:
+    net demand = demand_0 + imports - exports
+
+    Parameters:
+    - timeslice_dict_by_year: dataframes[year], i.e., dict of {timeslice: {k: {'df': ..., ...}}}
+    - width, height: figure dimensions
+    """
+
+    def timeslice_sort_key(ts):
+        match = re.match(r"[MW](\d+)", str(ts))
+        return int(match.group(1)) if match else ts
+
+    records = []
+
+    for timeslice, iterations in timeslice_dict_by_year.items():
+        if not iterations:
+            continue
+        last_k = max(iterations.keys(), key=lambda x: int(x) if str(x).isdigit() else x)
+        df = iterations[last_k]['df']
+        tdf = iterations[last_k].get('transmission_df', pd.DataFrame())
+
+        for country in df.index:
+            demand = df.loc[country, 'demand_0'] if 'demand_0' in df.columns else 0.0
+            imports = -tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] < 0), 'exchange'].sum() if not tdf.empty else 0.0
+            exports = tdf.loc[(tdf['start_country'] == country) & (tdf['exchange'] > 0), 'exchange'].sum() if not tdf.empty else 0.0
+            imports = imports if not pd.isna(imports) else 0.0
+            exports = exports if not pd.isna(exports) else 0.0
+            net_demand = demand + imports - exports
+            records.append({
+                'Timeslice': timeslice,
+                'Country': country,
+                'NetDemand': net_demand
+            })
+
+    df_all = pd.DataFrame(records)
+    df_all['Timeslice'] = pd.Categorical(
+        df_all['Timeslice'],
+        categories=sorted(df_all['Timeslice'].unique(), key=timeslice_sort_key),
+        ordered=True
+    )
+    countries = df_all['Country'].unique()
+    cols = 4
+    rows = (len(countries) + cols - 1) // cols
+
+    fig = make_subplots(
+        rows=rows, cols=cols,
+        subplot_titles=countries,
+        shared_xaxes=True, shared_yaxes=True,
+        vertical_spacing=0.12, horizontal_spacing=0.05,
+        specs=[[{} for _ in range(cols)] for _ in range(rows)]
+    )
+
+    for i, country in enumerate(countries):
+        row = i // cols + 1
+        col = i % cols + 1
+        subset = df_all[df_all['Country'] == country].sort_values('Timeslice')
+
+        fig.add_trace(go.Bar(
+            x=subset['Timeslice'], y=subset['NetDemand'],
+            name='Net Demand',
+            marker_color='purple',
+            legendgroup='NetDemand', showlegend=(i == 0),
+            offsetgroup='netdemand',
+            base=0
+        ), row=row, col=col)
+
+    fig.update_layout(
+        height=height, width=width,
+        title_text="Net Demand (demand+ + imports - exports) per Timeslice and Country",
+        barmode='group',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5)
+    )
+
+    fig.update_yaxes(title_text="Net Demand")
+    fig.show()
+
+    return df_all
+
 def plot_demand_across_timeslices(timeslice_dict_by_year, width=1600, height=900):
     """
     Plot demand_0, imports, and exports across timeslices using only the last iteration per timeslice.
