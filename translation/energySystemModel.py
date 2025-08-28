@@ -154,31 +154,30 @@ class EnergyModelClass:
         for self.t_pos in tqdm(range(self.t_pos, len(self.time_resolution)), desc=f"Solving year {year}"):
             no_transmission_flag = False
             t = self.time_resolution[self.t_pos]
-            if t in ['W2', 'W3', 'W7', 'W8', 'W9', 'W22', 'W25', 'W27', 'W28', 'W29', 'W31', 'W32', 'W33', 'W46', 'W47']:
-                no_transmission_flag = True
-                if self.k_pos == 0:
-                    self.calculate_demand_profiles(t, year)
-                self.first_optimization = {country: False for country in self.countries}
-                for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
-                    self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
-                    marginal_costs_df = self.solve_internal_problem(t, year)
-                    if self.check_convergence(marginal_costs_df, no_transmission_flag):
-                        self.logger.info(f"Convergence reached for time {t} and year {year} after {self.k_pos} iterations")
-                        self.solve_transmission_problem(t, year)
-                        self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
-                        status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
-                        break
-                    no_transmission_flag = self.solve_transmission_problem(t, year)
+            no_transmission_flag = True
+            if self.k_pos == 0:
+                self.calculate_demand_profiles(t, year)
+            self.first_optimization = {country: False for country in self.countries}
+            for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
+                self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
+                marginal_costs_df = self.solve_internal_problem(t, year)
+                if self.check_convergence(marginal_costs_df, no_transmission_flag):
+                    self.logger.info(f"Convergence reached for time {t} and year {year} after {self.k_pos} iterations")
+                    self.solve_transmission_problem(t, year)
                     self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
-                    # Save the status of the class to a file for recovery
                     status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
-                    with open(status_file, "wb") as f:
-                        pickle.dump(self, f)
-                #self.update_data(t, year)
-                if self.k_pos == self.max_iteration:
-                    self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
-                marginal_costs_df = None
-                self.reset()
+                    break
+                no_transmission_flag = self.solve_transmission_problem(t, year)
+                self.reader.save(folder=os.path.join(self.config_parser.get_output_file_path(), f"DCOP/{year}/{t}"), transmission_data=self.transmission_data)
+                # Save the status of the class to a file for recovery
+                status_file = os.path.join(self.config_parser.get_output_file_path(), f"model_status.pkl")
+                with open(status_file, "wb") as f:
+                    pickle.dump(self, f)
+            #self.update_data(t, year)
+            if self.k_pos == self.max_iteration:
+                self.logger.warning(f"Maximum iterations reached for time {t} and year {year}")
+            marginal_costs_df = None
+            self.reset()
     
     def reset(self):
         self.transmission_data_max_capacity = self.transmission_data_capacity.copy()  # Reset transmission data for the next time slice
