@@ -28,7 +28,7 @@ def clear_snakemake_logs(base_path):
 
 # Example usage:
 pypsa_earth_path = './pypsa_earth'
-folders_to_keep = ['yearly']  # Replace with your folder names to keep
+folders_to_keep = []  # Replace with your folder names to keep
 
 clean_folders(pypsa_earth_path, folders_to_keep)
 clear_snakemake_logs(pypsa_earth_path)
