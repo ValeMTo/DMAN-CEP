@@ -48,7 +48,8 @@ class TransmissionModelClass:
                 MC_export = self.marginal_costs_df.loc[country, 'MC_export'],
                 cost_percentage_threshold = self.cost_percentage_threshold,
                 transmission_cost = self.cost_transmission_line,
-                marginal_demand = round(self.delta_demand_map[country]['marginal_demand'])
+                marginal_demand = round(self.delta_demand_map[country]['marginal_demand']),
+                agreement = self.agreement
             )
 
         rows = []
@@ -102,7 +103,7 @@ class TransmissionModelClass:
         return pd.DataFrame(rows)
     
 class TransmissionAgentClass:
-    def __init__(self, country, logger, data, MC_import, MC_export, cost_percentage_threshold, transmission_cost, marginal_demand):
+    def __init__(self, country, logger, data, MC_import, MC_export, cost_percentage_threshold, transmission_cost, marginal_demand, agreement):
         self.country = country
         self.logger = logger
         self.data = data
@@ -112,6 +113,7 @@ class TransmissionAgentClass:
         self.transmission_cost = transmission_cost
         self.marginal_demand = marginal_demand
         self.status = 'unsatisfied'
+        self.agreement = agreement
 
         self.inbox = []
         self.outbox = []
