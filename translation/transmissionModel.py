@@ -19,6 +19,7 @@ class TransmissionModelClass:
         self.xml_file_path = xml_file_path
         self.xml_generator = XMLGeneratorClass(logger=self.logger)
         self.expansion_enabled = expansion_enabled
+        self.agreement = 0.5 # between importer and export cost
 
         self.logger.debug('Marginal costs DataFrame initialized')
         self.logger.debug(self.marginal_costs_df)
@@ -125,7 +126,8 @@ class TransmissionAgentClass:
                         start_country=row['end_country'],
                         end_country=row['start_country'],
                         capacity=row['capacity'],
-                        price=round((self.MC_import) * (1 + self.cost_percentage_threshold), 2)
+                        MC_importer=round((self.MC_import - self.transmission_cost), 2),
+                        agreement=self.agreement
                     )
                     self.outbox.append(bid)
         return self.outbox
@@ -164,11 +166,15 @@ class TransmissionAgentClass:
         # Gather all bids: incoming (inbox) and outgoing (outbox)
         all_bids = []
         for bid in self.inbox:
-            utility = (bid.price + self.transmission_cost - self.MC_export * (1 + self.cost_percentage_threshold)) * bid.capacity
+            if bid.MC_exporter != self.MC_export:
+                raise ValueError("MC_exporter of the bid does not match the agent's MC_export")
+            utility = (bid.price - bid.MC_exporter) * bid.capacity
             all_bids.append((utility, 'exporter', bid))
             self.logger.debug(f"Bid from {bid.sender} to {bid.end_country} with utility {utility} as exporter")
         for bid in self.outbox:
-            utility = (bid.price + self.transmission_cost - bid.MC_exporter * (1 + self.cost_percentage_threshold)) * bid.capacity
+            if bid.MC_importer != self.MC_import - self.transmission_cost:
+                raise ValueError("MC_importer of the bid does not match the agent's MC_import")
+            utility = (bid.price + self.transmission_cost - bid.MC_importer) * bid.capacity
             all_bids.append((utility, 'importer', bid))
             self.logger.debug(f"Bid from {self.country} to {bid.end_country} with utility {utility} as importer")
 
@@ -210,17 +216,20 @@ class TransmissionBidClass:
             sender,
             start_country,
             end_country,
-            capacity,
-            price):
+            capacity, 
+            MC_importer, 
+            agreement):
         self.sender = sender
         self.start_country = start_country
         self.end_country = end_country
         self.capacity = capacity
-        self.price = price
-        self.MC_exporter = np.inf 
+        self.price = None
+        self.MC_importer = MC_importer
+        self.MC_exporter = np.inf
         self.status_sender = TransmissionBidStatus.PENDING
         self.status_receiver = TransmissionBidStatus.PENDING
-    
+        self.agreement = agreement
+
     def change_status_sender(self, new_status):
         if isinstance(new_status, TransmissionBidStatus):
             self.status_sender = new_status
@@ -236,6 +245,7 @@ class TransmissionBidClass:
     def set_MC_exporter(self, MC_exporter):
         if isinstance(MC_exporter, (int, float, np.integer, np.floating)):
             self.MC_exporter = MC_exporter
+            self.price = round(((self.MC_importer + self.MC_exporter) * self.agreement), 2)
         else:
             raise ValueError("MC_exporter must be a numeric value")
 class TransmissionBidStatus(Enum):
