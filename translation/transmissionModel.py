@@ -93,6 +93,18 @@ class TransmissionModelClass:
                 del agents[name]
                 self.logger.debug(f"Removed agent {name} from the model")
             self.data = self.data[~self.data['start_country'].isin(to_remove_agents) & ~self.data['end_country'].isin(to_remove_agents)]
+            
+            # Track unchanged data for early stopping
+            if not hasattr(self, '_data_history'):
+                self._data_history = []
+
+            self._data_history.append(self.data.copy(deep=True))
+
+            if len(self._data_history) > 5:
+                last_five = self._data_history[-5:]
+                if all(last_five[0].equals(df) for df in last_five[1:]):
+                    self.logger.debug("Data unchanged for more than 5 iterations, stopping early.")
+                    break
             for agent in agents.values():
                 agent.erase_messages()
                 agent.erase_neighbours(to_remove_agents)
@@ -135,7 +147,7 @@ class TransmissionAgentClass:
         return self.outbox
     
     def receive_bid(self, bid):
-        self.logger.debug(f"Receiving bid from {bid.sender} to {bid.end_country}")
+        self.logger.debug(f"Receiving bid from {bid.sender} to {bid.start_country}")
         bid.set_MC_exporter(self.MC_export)
         self.inbox.append(bid)
     
@@ -172,13 +184,13 @@ class TransmissionAgentClass:
                 raise ValueError("MC_exporter of the bid does not match the agent's MC_export")
             utility = (bid.price - bid.MC_exporter) * bid.capacity
             all_bids.append((utility, 'exporter', bid))
-            self.logger.debug(f"Bid from {bid.sender} to {bid.end_country} with utility {utility} as exporter")
+            self.logger.debug(f"Bid from {bid.sender} to {bid.start_country} with utility {utility} as exporter")
         for bid in self.outbox:
-            if bid.MC_importer != self.MC_import - self.transmission_cost:
+            if bid.MC_importer != round(self.MC_import - self.transmission_cost, 2):
                 raise ValueError("MC_importer of the bid does not match the agent's MC_import")
             utility = (bid.price + self.transmission_cost - bid.MC_importer) * bid.capacity
             all_bids.append((utility, 'importer', bid))
-            self.logger.debug(f"Bid from {self.country} to {bid.end_country} with utility {utility} as importer")
+            self.logger.debug(f"Bid from {self.country} to {bid.start_country} with utility {utility} as importer")
 
         # Sort by utility descending
         all_bids.sort(key=lambda x: x[0], reverse=True)
