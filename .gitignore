@@ -1,36 +1,7 @@
-/agents
-/experiments
-/frodo2
-/lib
-/org
-RELEASE_NOTES.txt
-LICENSE.txt
-META-INF/MANIFEST.MF
-frodo2.18.1.jar
-FRODO_online_manual.html
-/repository/examples
-/data
-/translation/__pycache__
-/translation/parsers/__pycache__
-/translation/tests/__pycache__
-/logs
-gurobi.log
-solution.xml
-solution.xml
-translation/test.ipynb
-solution.xml
-.DS_Store
+SAPP-monthly-emissions-10flex-2H-pt2.txt
 
-solutions/*
-!solutions/*.py
 
-translation/parsers/retrieve_osemosys_data.ipynb
-.DS_Store
-hamcrest-core-1.3.jar
-junit-4.13.2.jar
-/osemosys_data
-.vscode/launch.json
-.DS_Store
-.DS_Store
-jobs.png
-translation/retriever/__pycache__/transmissionRetriever.cpython-311.pyc
+# Ignore files of these types in plots/ AND all its subdirectories
+plots/**/*.png
+plots/**/*.json
+plots/**/*.html
