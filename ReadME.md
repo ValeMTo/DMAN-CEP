@@ -8,9 +8,9 @@ DMAN-CEP is a research prototype for distributed / multi-agent energy system pla
 
 This approach allows for scalable, privacy-preserving, and flexible planning across interconnected energy systems, supporting collaborative decision-making without requiring centralized data sharing.
 
-**Reference:** This repository accompanies the approach described in “Distributed Multi-Agent Negotiation for Capacity Expansion Planning” (Amato et al.) applied to the Southern African Power Pool (SAPP).
+>**Reference**: This repository accompanies the approach described in “Distributed Multi-Agent Negotiation for Capacity Expansion Planning” (Amato et al.) applied to the Southern African Power Pool (SAPP).
 
-## Key idea (1 minute)
+## Key idea 
 
 The framework models countries as autonomous agents that cooperate to minimize costs while respecting local constraints. The process follows this logic:
 
