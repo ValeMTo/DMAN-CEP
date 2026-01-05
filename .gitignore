@@ -34,3 +34,8 @@ junit-4.13.2.jar
 .DS_Store
 jobs.png
 translation/retriever/__pycache__/transmissionRetriever.cpython-311.pyc
+solutions/merge
+!solutions/SAPP-monthly-emissions-10flex-0.2-v3
+!solutions/SAPP-weekly-emissions-10flex-0.2-v3+2-ok-convergence100
+!solution/SAPP-yearly-emissions-0.2-v3+1-ok
+
