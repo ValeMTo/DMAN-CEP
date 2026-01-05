@@ -1,4 +1,0 @@
-Example 1
-==============
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec ultricies ultrices turpis in malesuada. Ut molestie neque vitae massa blandit, vitae bibendum neque mollis. Sed ac felis venenatis ipsum fermentum porttitor quis quis urna. Suspendisse convallis libero ut ultricies semper. Praesent est ipsum, iaculis nec luctus at, aliquam non urna. Aenean vel enim ligula. Nulla dui diam, tempor in purus vel, lobortis fermentum lacus. Proin et nulla at nulla vehicula varius id quis sapien. Fusce metus quam, commodo et elit ac, viverra gravida nulla. Nullam at fermentum massa, in faucibus enim. Donec id eros scelerisque quam feugiat tincidunt. Quisque lacus odio, dictum porta laoreet ac, egestas ac arcu. Nunc felis urna, rhoncus ac metus sit amet, fringilla porttitor leo. Etiam tristique velit a eros hendrerit feugiat.

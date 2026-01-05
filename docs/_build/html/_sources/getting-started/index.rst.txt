@@ -1,8 +1,0 @@
-Quick Start
-===========
-
-.. toctree::
-   :maxdepth: 1
-
-   minimal_three_node
-   meshed_acdc
