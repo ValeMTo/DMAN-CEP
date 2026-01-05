@@ -12,7 +12,9 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         status_file = sys.argv[1]
 
+    #status_file = "/home/vamato/distributed-energy-systems/solutions/SAPP-weekly-emissions-nohydrogen-10flex-0.2-v3/model_status.pkl"
     if status_file and os.path.exists(status_file):
+        print(f"Resuming from status file: {status_file}")
         with open(status_file, "rb") as f:
             status = pickle.load(f)
         print(f"Loaded status from {status_file}: {status}")
@@ -21,6 +23,7 @@ if __name__ == "__main__":
             setattr(model, attr, value)
         model.k_pos = model.k_pos + 1
     else:
+        #sys.exit()
         model = EnergyModelClass()
 
     retries = 0
