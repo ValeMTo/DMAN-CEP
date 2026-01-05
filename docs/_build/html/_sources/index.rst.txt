@@ -4,7 +4,7 @@
    contain the root `toctree` directive.
 
 DEOpNet: Distributed Energy Optimization Network
-===========================================
+=================================================
 
 **DEOpNet** is a research prototype for distributed energy system planning based on
 **Distributed Constraint Optimization Problems (DCOPs)**. Unlike traditional
@@ -37,6 +37,7 @@ DEOpNet is solved using the Frodo2_ DCOP framework.
    :caption: User Guide
    :hidden:
 
+   user-guide/Model-Architecture
    user-guide/Model-Structure
    user-guide/Model-Formulation
 
@@ -57,4 +58,4 @@ DEOpNet is solved using the Frodo2_ DCOP framework.
    Contacts
    FAQ
 
-**Licence**: Copyright 2025 Valeria Amato --- DEOpNet is licensed under the open source `MIT License <https://github.com/PyPSA/PyPSA/blob/master/LICENSE.txt>`_.
+**Licence**: Copyright 2025 Valeria Amato --- DEOpNet is licensed under the open source `CC0-1.0 License <https://creativecommons.org/publicdomain/zero/1.0/>`_.

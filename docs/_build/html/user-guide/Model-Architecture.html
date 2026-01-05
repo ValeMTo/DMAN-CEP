@@ -6,7 +6,7 @@
   <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Model Structure &mdash; DEOptNet 0.1.0 documentation</title>
+  <title>Model Architecture &mdash; DEOptNet 0.1.0 documentation</title>
       <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
       <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
       <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=1c65b594" />
@@ -20,7 +20,7 @@
     <script src="../_static/js/theme.js"></script>
     <link rel="index" title="Index" href="../genindex.html" />
     <link rel="search" title="Search" href="../search.html" />
-    <link rel="next" title="Model Formulation" href="Model-Formulation.html" />
+    <link rel="next" title="Model Structure" href="Model-Structure.html" />
     <link rel="prev" title="Introduction" href="../getting-started/Introduction.html" /> 
 </head>
 
@@ -50,7 +50,15 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
 <ul class="current">
-<li class="toctree-l1 current"><a class="current reference internal" href="#">Model Structure</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Model Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#translation">translation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#parsers">parsers</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#resources">resources</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="Model-Structure.html">Model Structure</a></li>
 <li class="toctree-l1"><a class="reference internal" href="Model-Formulation.html">Model Formulation</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Examples</span></p>
@@ -88,9 +96,9 @@
           <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
       <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
-      <li class="breadcrumb-item active">Model Structure</li>
+      <li class="breadcrumb-item active">Model Architecture</li>
       <li class="wy-breadcrumbs-aside">
-            <a href="../_sources/user-guide/Model-Structure.rst.txt" rel="nofollow"> View page source</a>
+            <a href="../_sources/user-guide/Model-Architecture.rst.txt" rel="nofollow"> View page source</a>
       </li>
   </ul>
   <hr/>
@@ -98,9 +106,57 @@
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
              
-  <section id="model-structure">
-<h1>Model Structure<a class="headerlink" href="#model-structure" title="Link to this heading"></a></h1>
-<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec ultricies ultrices turpis in malesuada. Ut molestie neque vitae massa blandit, vitae bibendum neque mollis. Sed ac felis venenatis ipsum fermentum porttitor quis quis urna. Suspendisse convallis libero ut ultricies semper. Praesent est ipsum, iaculis nec luctus at, aliquam non urna. Aenean vel enim ligula. Nulla dui diam, tempor in purus vel, lobortis fermentum lacus. Proin et nulla at nulla vehicula varius id quis sapien. Fusce metus quam, commodo et elit ac, viverra gravida nulla. Nullam at fermentum massa, in faucibus enim. Donec id eros scelerisque quam feugiat tincidunt. Quisque lacus odio, dictum porta laoreet ac, egestas ac arcu. Nunc felis urna, rhoncus ac metus sit amet, fringilla porttitor leo. Etiam tristique velit a eros hendrerit feugiat.</p>
+  <section id="model-architecture">
+<h1>Model Architecture<a class="headerlink" href="#model-architecture" title="Link to this heading"></a></h1>
+<p>This page describes the main structure of the repository and the roles of the key classes and modules.</p>
+<section id="translation">
+<h2>translation<a class="headerlink" href="#translation" title="Link to this heading"></a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">translation</span></code> folder contains the core classes that define the model:</p>
+<p><strong>energySystemModel.py</strong></p>
+<p>The central orchestrator of the modeling process. It is responsible for:</p>
+<ul class="simple">
+<li><p>Creating the internal COP (Constraint Optimization Problem) models for each country by calling <code class="docutils literal notranslate"><span class="pre">energyAgentModel.py</span></code>.</p></li>
+<li><p>Solving the internal COPs by interfacing with Frodo2 (executing the Java solver).</p></li>
+<li><p>Managing parallel solving of multiple COPs to improve efficiency.</p></li>
+<li><p>Solving the upper DCOP (Distributed Constraint Optimization Problem) for the entire system per timeslice and year.</p></li>
+<li><p>Gathering and processing results from the solved DCOPs.</p></li>
+</ul>
+<p><strong>energyAgentModel.py</strong></p>
+<p>Defines the model for a single agent (typically representing a country for a given timeslice and year). This class is called by <code class="docutils literal notranslate"><span class="pre">energySystemModel</span></code> and is responsible for:</p>
+<ul class="simple">
+<li><p>Setting up the internal COP for the specific agent.</p></li>
+<li><p>Encoding the agent’s variables, domains, and constraints.</p></li>
+</ul>
+<section id="parsers">
+<h3>parsers<a class="headerlink" href="#parsers" title="Link to this heading"></a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">parsers</span></code> subfolder contains helper modules for data ingestion:</p>
+<p><strong>configParser.py</strong></p>
+<p>Loads and processes configuration settings required for the model run.</p>
+<p><strong>dataParser.py</strong></p>
+<p>Reads and structures the input data (e.g., resource potentials, demand profiles) retrieved and preprocessed in the <code class="docutils literal notranslate"><span class="pre">resources</span></code> folder.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Different parsers have been or will be developed to handle data from various sources.
+Depending on the origin of the data, specific parsing logic is applied.
+The goal is to take raw data, preprocess it into a standardized format, and load it into the model through <code class="docutils literal notranslate"><span class="pre">dataParser</span></code>.</p>
+<p>For example, data sources may include:</p>
+<ul class="simple">
+<li><p><strong>Zenodo</strong>: Publicly available datasets hosted on Zenodo.</p></li>
+<li><p><strong>Local Storage</strong>: Files stored locally on the user’s machine.</p></li>
+<li><p><strong>Other Sources</strong>: Custom or external data sources specified by the user.</p></li>
+</ul>
+</div>
+</section>
+</section>
+<section id="resources">
+<h2>resources<a class="headerlink" href="#resources" title="Link to this heading"></a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">resources</span></code> folder contains all the external input data required by the model, such as:</p>
+<ul class="simple">
+<li><p>Preprocessed datasets</p></li>
+<li><p>Configuration files</p></li>
+<li><p>Any additional resources needed for building and solving the DCOPs.</p></li>
+</ul>
+</section>
 </section>
 
 
@@ -108,7 +164,7 @@
           </div>
           <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
         <a href="../getting-started/Introduction.html" class="btn btn-neutral float-left" title="Introduction" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
-        <a href="Model-Formulation.html" class="btn btn-neutral float-right" title="Model Formulation" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+        <a href="Model-Structure.html" class="btn btn-neutral float-right" title="Model Structure" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
     </div>
 
   <hr/>

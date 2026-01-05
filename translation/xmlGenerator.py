@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+import xml.dom.minidom
 from deprecated import deprecated
 import pandas as pd
 
@@ -8,6 +9,9 @@ class XMLGeneratorClass:
         self.logger.info("XML generator initialized")
 
         self.instance = self.create_frodo2_xml_head_instance()
+
+        self.functions = {}
+        self.predicates = {}
 
         self.max_arity = 1
 
@@ -46,6 +50,7 @@ class XMLGeneratorClass:
         for name, values in domain_values.items():
             ET.SubElement(domains_element, "domain", {"name": name, "nbValues": str(len(values))}).text = " ".join(map(str, values))
 
+    @deprecated(reason="Time resolution is not anymore fixed")
     def add_variable_from_name(self, technologies, variables, agents):
 
         variables_element = self.instance.find("variables")
@@ -118,75 +123,68 @@ class XMLGeneratorClass:
 
         return variable_list
     
-    def find_predicates_functions_main_elements(self, type):
-        """Finds the main element for predicates or functions."""
-        predicates_element = self.instance.find("predicates")
-        if (predicates_element is None):
-            predicates_element = ET.SubElement(self.instance, "predicates")
-        functions_element = self.instance.find("functions")
-        if (functions_element is None):
-            functions_element = ET.SubElement(self.instance, "functions")
+    def add_variable(self, name, domain, agent):
+        """Adds a single variable element with name, domain and agent in the XML file."""
 
-        if type == "predicates":
-            return predicates_element
-        elif type == "functions":
-            return functions_element
-        else:
-            raise ValueError("Type must be either 'predicates' or 'functions'")
+        variables_element = self.instance.find("variables")
+        if variables_element is None:
+            variables_element = ET.SubElement(self.instance, "variables")
+
+        ET.SubElement(variables_element, "variable", {
+            "name": name, 
+            "domain": domain, 
+            "agent": agent
+        })
     
     def add_predicate(self, name, parameters, functional):
         """Adds a single predicate element with parameters and functional expression."""
-        predicates_element = self.find_predicates_functions_main_elements('predicates')
+        predicates_element = self.instance.find("predicates")
+        if (predicates_element is None):
+            predicates_element = ET.SubElement(self.instance, "predicates")
         
         predicate_element = ET.SubElement(predicates_element, "predicate", {"name": name})
         ET.SubElement(predicate_element, "parameters").text = parameters
         expression_element = ET.SubElement(predicate_element, "expression")
         ET.SubElement(expression_element, "functional").text = functional
+        self.predicates[name] = 1
 
     def add_function(self, name, parameters, functional):
         """Adds a single function element with parameters and functional expression."""
-        functions_element = self.find_predicates_functions_main_elements('functions')
+        functions_element = self.instance.find("functions")
+        if (functions_element is None):
+            functions_element = ET.SubElement(self.instance, "functions")
         
         functions_element = ET.SubElement(functions_element, "function", {"name": name, "return": "int"})
         ET.SubElement(functions_element, "parameters").text = parameters
         expression_element = ET.SubElement(functions_element, "expression")
         ET.SubElement(expression_element, "functional").text = functional
+        self.functions[name] = 1
 
     def add_constraint(self, name, arity, scope, reference, parameters):
         """Adds a single constraint element with arity, scope and reference."""
+
         constraints_element = self.instance.find("constraints")
         if (constraints_element is None):
             constraints_element = ET.SubElement(self.instance, "constraints")
         
         constraint_element = ET.SubElement(constraints_element, "constraint", {"name": name, "arity": str(arity), "scope": scope, "reference": reference})
         ET.SubElement(constraint_element, "parameters").text = parameters
+        self.predicates[reference] = 1
 
         if arity > self.max_arity:
             self.max_arity = int(arity)
 
     def find_predicate(self, name):
         """Finds a predicate element by name."""
-        predicates_element = self.instance.find("predicates")
-        if predicates_element is None:
-            predicates_element = ET.SubElement(self.instance, "predicates")
-            return False
-        else:
-            for predicate in predicates_element.findall("predicate"):
-                if predicate.attrib["name"] == name:
-                    return True
-            return False
+        if self.predicates.get(name):
+            return True
+        return False
         
     def find_function(self, name):
         """Finds a function element by name."""
-        functions_element = self.instance.find("functions")
-        if functions_element is None:
-            functions_element = ET.SubElement(self.instance, "functions")
-            return False
-        else:
-            for function in functions_element.findall("function"):
-                if function.attrib["name"] == name:
-                    return True
-            return False
+        if self.functions.get(name):
+            return True
+        return False
 
     def add_minimum_capacity_constraint(self, variable_name, min_capacity):
         """Adds an hard constraint to the XML instance that enforces minimum installed capacity."""
@@ -230,7 +228,41 @@ class XMLGeneratorClass:
             parameters=f"{variable_name} {str(max_capacity)}"
         )
 
-    #TODO: to implement again - quick wrap up
+    def add_minimum_demand_constraint(self, variables, demand, extra_name):
+        """Adds an hard constraint to the XML instance that enforces minimum demand."""
+        def build_recursive(variables):
+            if len(variables) == 1:
+                return variables[0]
+            return add(variables[0], build_recursive(variables[1:]))
+        
+        self.logger.debug(f"Adding minimum demand constraint with extra_name '{extra_name}' and demand: {demand}")
+        constraint_name = f"minimumDemand_{extra_name}"
+        if not isinstance(demand, int):
+            raise ValueError("demand must be an integer")
+        
+        variable_params = " ".join([f"{{1 {var}}}" for var in variables])
+        self.add_constraint(
+            name=constraint_name, 
+            arity=len(variables), 
+            scope=" ".join(variables),
+            reference="global:weightedSum",
+            parameters=f"[{variable_params}] __GE_PLACEHOLDER__ {demand}"
+        )
+
+        return constraint_name
+
+    def remove_constraint(self, name):
+        """Removes a constraint element by name."""
+        constraints_element = self.instance.find("constraints")
+        if constraints_element is not None:
+            for constraint in constraints_element.findall("constraint"):
+                if constraint.get("name") == name:
+                    constraints_element.remove(constraint)
+                    return
+
+        raise ValueError(f"Constraint {name} not found")
+
+    @deprecated
     def add_minimum_respecting_demand(self, timeslice_technologies_modes, specified_demand_profile_df, specified_annual_demand_df, year_split_df):
         def build_recursive(variables):
             if len(variables) == 1:
@@ -351,6 +383,7 @@ class XMLGeneratorClass:
                             reference=f"minimumRateOfActivity_{f}",
                             parameters=f"{' '.join(rateOfActivity_variables)} {' '.join(weights)} {specified_demand}"
                         )
+    @deprecated
     def add_maximum_annual_activity_rate_per_timeslice_constraint(self, modes, factors_df):
         
         if not self.find_predicate("maximumAnnualRateActivityPerTimeslice"):
@@ -392,7 +425,42 @@ class XMLGeneratorClass:
                         )
                     else:
                         raise ValueError("The factor should be positive")
-
+                    
+    def add_maximum_activity_rate_constraint(self, cap_variable, capActivity_variable, factor, div_weight):
+        """Adds an hard constraint to the XML instance that enforces maximum rate fo activity."""
+        if factor >= 1:
+            if not self.find_predicate("maximumRateActivity_mul"):
+                self.add_predicate(
+                    name="maximumRateActivity_mul", 
+                    parameters="int rateActivity int capacity int factor int div_weight", 
+                    functional=boolean_le(mul("rateActivity", 'div_weight'), mul("capacity", "factor"))
+                )
+        elif 0 <= factor < 1:
+            if not self.find_predicate("maximumRateActivity_div"):
+                self.add_predicate(
+                    name="maximumRateActivity_div", 
+                    parameters="int rateActivity int capacity int factor int div_weight", 
+                    functional=boolean_le("rateActivity", div(div("capacity", "factor"), 'div_weight'))
+                )
+        else:
+            raise ValueError("The factor should be positive")
+        if factor >= 1 or factor == 0:
+            self.add_constraint(
+                name=f"maximumRateActivity_{cap_variable.replace('_capacity', '')}", 
+                arity=2, 
+                scope=f"{cap_variable} {capActivity_variable}", 
+                reference="maximumRateActivity_mul",
+                parameters=f"{capActivity_variable} {cap_variable} {round(factor)} {div_weight}"
+            )
+        elif factor < 1 and factor > 0: 
+            self.add_constraint(
+                name=f"maximumRateActivity_{cap_variable.split('_')[0]}", 
+                arity=2, 
+                scope=f"{cap_variable} {capActivity_variable}", 
+                reference="maximumRateActivity_div",
+                parameters=f"{capActivity_variable} {cap_variable} {round(1/factor)} {div_weight}"
+            )
+    
     def add_minimum_annual_activity_rate_per_timeslice_constraint(self, modes, factors_df, non_dispatchable_technologies):
         
         if not self.find_predicate("minimumAnnualRateActivityPerTimeslice"):
@@ -793,7 +861,28 @@ class XMLGeneratorClass:
 
         if len(variables) > self.max_arity:
             self.max_arity = len(variables)
-    
+
+    def add_cost_constraint(self, variable_capacity_name, rateActivity_variable, previous_installed_capacity, capital_cost, variable_cost, fixed_cost):
+        """Adds a soft constraint to the XML instance for cost."""
+        if not self.find_function("cost_constraint"):
+            self.add_function(
+                name="cost_constraint", 
+                parameters="int capacity int rateActivity int previous_installed_capacity int capital_cost int variable_cost int fixed_cost",
+                functional=add(
+                    mul(sub("capacity", "previous_installed_capacity"), "capital_cost"),
+                    add(div(mul("rateActivity", "variable_cost"), 1000000), div(mul("capacity", "fixed_cost"), 1000))
+                )
+            )
+
+        self.add_constraint(
+            name=f"cost_constraint_{variable_capacity_name.replace('_capacity', '')}",
+            arity=2,
+            scope=variable_capacity_name + " " + rateActivity_variable,
+            reference="cost_constraint",
+            parameters=f"{variable_capacity_name} {rateActivity_variable} {previous_installed_capacity} {capital_cost} {variable_cost} {fixed_cost}"
+        )
+
+
     def add_operating_cost_minimization_constraint(self, weight, variable_capacity_name, variable__rateActivity_name, cost_per_MWh):
         """Adds a soft constraint to the XML instance that enforces maximum operating cost."""
 
@@ -840,17 +929,14 @@ class XMLGeneratorClass:
         if self.max_arity < 2:
             self.max_arity = 2
 
-    def add_installing_cost_minimization_constraint(self, weight, variable_capacity_name, previous_installed_capacity, cost_per_MW, extra_name=""):
+    def add_installing_cost_minimization_constraint(self, variable_capacity_name, previous_installed_capacity, cost_per_MW, extra_name=""):
         """Adds a soft constraint to the XML instance that enforces maximum installing cost."""
-
-        if not isinstance(weight, int) or not isinstance(cost_per_MW, int):
-            raise ValueError("weight and cost_per_MW must be integers")
 
         if not self.find_function(f"minimize_installingCost"):
             self.add_function(
                 name=f"minimize_installingCost", 
-                parameters="int weight int capacity int oldCapacity int cost_per_MW",
-                functional= div(mul(sub("capacity", "oldCapacity"), "cost_per_MW"), "weight")
+                parameters="int capacity int oldCapacity int cost_per_MW",
+                functional= mul(sub("capacity", "oldCapacity"), "cost_per_MW")
             )
 
         self.add_constraint(
@@ -858,9 +944,31 @@ class XMLGeneratorClass:
             arity=1,
             scope=f"{variable_capacity_name}",
             reference=f"minimize_installingCost",
-            parameters=f"{weight} {variable_capacity_name} {previous_installed_capacity} {cost_per_MW}"
+            parameters=f"{variable_capacity_name} {previous_installed_capacity} {cost_per_MW}"
         )
 
+    def add_variable_cost_minimization_constraint(self, variable_name, cost_per_TJ):
+        """Adds a soft constraint to the XML instance that enforces maximum variable cost."""
+
+        if not self.find_function(f"minimize_variableCost"):
+            self.add_function(
+                name=f"minimize_variableCost", 
+                parameters="int variable int cost_per_TJ",
+                functional= mul("variable", "cost_per_TJ")
+            )
+        
+        if not isinstance(cost_per_TJ, int):
+            raise ValueError("cost_per_TJ must be an integer")
+        
+        self.add_constraint(
+            name=f"minimize_variableCost_{variable_name.replace('_variable', '')}",
+            arity=1,
+            scope=f"{variable_name}",
+            reference=f"minimize_variableCost",
+            parameters=f"{variable_name} {cost_per_TJ}"
+        )
+        
+    @deprecated
     def add_minimizing_operating_cost_constraint(self, weight, rateActivity_variables, cost_per_unit_of_activity, year_split_df):
         """Adds a soft constraint to the XML instance that enforces maximum operating cost."""
         def build_recursive(factors):
@@ -908,15 +1016,107 @@ class XMLGeneratorClass:
 
         if len(rateActivity_variables) > self.max_arity:
             self.max_arity = len(rateActivity_variables)
-        
     
+    def add_symmetry_constraint(self, extra_name, var1, var2):
+        """
+        Adds a symmetry constraint to the XML instance.
+        The symmetry constraint ensures that var1 = -var2.
+        """
+        
+        if not self.find_predicate("symmetry"):
+            self.add_predicate(
+                name="symmetry", 
+                parameters="int var1 int var2",
+                functional=boolean_eq('var1', neg('var2'))
+            )
+
+        self.add_constraint(
+            name=f"symmetry_{extra_name}",
+            arity=2,
+            scope=f"{var1} {var2}",
+            reference="symmetry",
+            parameters=f"{var1} {var2}"
+        )
+
+        if self.max_arity < 2:
+            self.max_arity = 2
+
+    def add_power_balance_constraint(self, extra_name, flow_variables, delta):
+        """
+        Adds a power balance constraint to the XML instance.
+        The power balance constraint ensures that the sum of import flows minus 
+        the sum of export flows equals plus delta.
+        """
+        def build_recursive_add_expression(vars):
+            if len(vars) == 1:
+                return abs_val(vars[0])
+            if len(vars) == 2:
+                return add(abs_val(vars[0]), abs_val(vars[1]))
+            return add(abs_val(vars[0]), build_recursive_add_expression(vars[1:]))
+
+        num = len(flow_variables)
+        if num > 0:
+            if not isinstance(delta, int):
+                raise ValueError("delta must be an integer")
+
+            if not self.find_predicate(f"powerBalance_{num}"):
+                self.add_predicate(
+                    name=f"powerBalance_{num}", 
+                    parameters=" ".join([f"int var_{i}" for i in range(num)]) + " int delta",
+                    functional=boolean_le(build_recursive_add_expression([f"var_{i}" for i in range(num)]), "delta")
+                )
+            self.add_constraint(
+                name=f"powerBalance_{num}_{extra_name}",
+                arity=num,
+                scope=f"{' '.join(flow_variables)}",
+                reference=f"powerBalance_{num}",
+                parameters=f"{' '.join(flow_variables)} {delta}"
+            )
+            
+    def add_utility_function_constaint(self, extra_name, variables, import_marginal_costs, export_marginal_costs, cost):
+        def build_recursive(variables):
+            if len(variables) == 1:
+                return variables[0]
+            return add(variables[0], build_recursive(variables[1:]))
+        
+        benefits = []
+        for i in range(len(variables)):
+            benefits.append(export_marginal_costs[i] + cost - import_marginal_costs[i])
+
+        if not self.find_predicate(f"maximise_utilityFunction_{len(variables)}"):
+            self.add_function(
+                name=f"maximise_utilityFunction_{len(variables)}", 
+                parameters=" ".join([f"int {var}" for var in variables]) + " " + " ".join([f"int benefit_{i}" for i in range(len(variables))]) + " int cost",
+                functional=build_recursive([
+                    conditional(
+                        boolean_lt(var, "0"),
+                        "0",
+                        mul(var, f"benefit_{i}")
+                    ) for i, var in enumerate(variables)
+                ])
+            )
+
+        self.add_constraint(
+            name=f"utilityFunction_{len(variables)}_{extra_name}",
+            arity=len(variables),
+            scope=f"{' '.join(variables)}",
+            reference=f"maximise_utilityFunction_{len(variables)}",
+            parameters=f"{' '.join(variables)} {' '.join([str(b) for b in benefits])} {cost}"
+        )
+
     def print_xml(self, output_file = "defaultName_problem.xml"):
         """Prints the XML instance to a file."""
         self.set_max_arity_contraints()
+        xml_str = ET.tostring(self.instance, encoding="unicode")
 
-        tree = ET.ElementTree(self.instance)
-        ET.indent(tree, space="  ", level=0)
-        tree.write(output_file, encoding="utf-8", xml_declaration=True)
+        # Replace placeholders with actual XML tags        
+        xml_str = xml_str.replace("__GT_PLACEHOLDER__", "<gt/>")
+        xml_str = xml_str.replace("__GE_PLACEHOLDER__", "<ge/>")
+
+        dom = xml.dom.minidom.parseString(xml_str)
+        pretty_xml = dom.toprettyxml()
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(pretty_xml)
 
         self.logger.info(f"XML generated and saved to {output_file}")
 

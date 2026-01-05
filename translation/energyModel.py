@@ -18,6 +18,7 @@ class EnergyModelClass:
 
         self.name = self.config_parser.get_problem_name()
         self.countries = self.config_parser.get_countries()
+        self.time_resolution = self.config_parser.get_annual_time_resolution()
         self.year = self.config_parser.get_year()
 
         self.logger.info("Energy model initialized")
@@ -35,6 +36,7 @@ class EnergyModelClass:
         )
         return logging.getLogger(__name__)
     
+    @deprecated(reason="Olf function to fix the collected data")
     def add_extra_power_tech(self, extra_power_tech):
         self.power_tech = [tech for tech in self.power_tech if tech[-1] == 'N' or tech[-1] == 'X']
         self.power_tech.extend(extra_power_tech)
@@ -45,7 +47,6 @@ class EnergyModelClass:
             raise ValueError("Data does not have a 'COUNTRY' column")
         data = data.loc[data['COUNTRY'].isin(self.countries)]
 
-        self.power_tech = ['NGGCP04N', 'NGCCP03N', 'HYDMS03X', 'HYDMS02X', 'HYDMS01X', 'WINDP00X', 'LFRCP01N']#['HYDMS03X', 'HYDMS02X', 'HYDMS01X', 'SOC1P00X', 'BMCHC02N', 'WINDP01X', 'WINDP00X', 'NGGCP04N', 'NGCCP03N', 'LFRCP01N', 'HFGCP02N']
         if only_powerplants:
             if 'TECH' in data.columns:
                 data = data.loc[data['TECH'].isin(self.power_tech)]

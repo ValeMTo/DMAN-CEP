@@ -1,5 +1,5 @@
 import unittest
-from translation.energyModel import EnergyModelClass
+from translation.energyAgentModel import EnergyModelClass
 from translation.tests.xmlGeneratorTest import to_pretty_xml
 from unittest.mock import MagicMock
 
