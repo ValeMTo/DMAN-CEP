@@ -156,9 +156,12 @@ class EnergyModelClass:
             t = self.time_resolution[self.t_pos]
             no_transmission_flag = True
             if self.k_pos == 0:
+                print("initialising: K == 0")
                 self.calculate_demand_profiles(t, year)
             self.first_optimization = {country: False for country in self.countries}
             for self.k_pos in tqdm(range(self.k_pos, self.max_iteration), desc=f"Solving timeslice {t} for year {year}"):
+                print(f"k: ", self.k_pos)
+                print(self.demand_map)
                 self.reader = self.prepare_reader(k=self.k_pos, t=t, year=year)
                 marginal_costs_df = self.solve_internal_problem(t, year)
                 if self.check_convergence(marginal_costs_df, no_transmission_flag):
@@ -264,6 +267,9 @@ class EnergyModelClass:
                 self.demand_map[t][country]['original_demand'] = profile
                 self.demand_map[t][country]['demand'] = profile
                 self.demand_map[t][country]['marginal_demand'] = profile * self.delta_marginal_cost
+
+        print(self.demand_map)
+        self.logger.debug(self.demand_map)
 
     def solve_transmission_problem(self, time, year):
         self.logger.info(f"Solving transmission problem for time {time}")

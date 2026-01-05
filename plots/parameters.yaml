@@ -1,0 +1,25 @@
+yearly:
+  folder: 'solutions/SAPP-yearly-emissions-nohydrogen-10flex-0.2-v3'
+  extra: ''
+monthly:
+  folder: 'solutions/SAPP-monthly-emissions-nohydrogen-10flex-0.2-v3'
+  extra: ''
+weekly:
+  folder: 'solutions/SAPP-weekly-emissions-nohydrogen-10flex-0.2-v3'
+  extra: ''
+centralized:
+  network_path: "./pypsa_earth/results/SAPP-centralized-noHydrogen-363mt-2h-120flex-gadm0/networks/elec_s_120flex_ec_lcopt_Co2L-2H.nc"
+  unsolved_network_path: "./pypsa_earth/networks/SAPP-centralized-noHydrogen-363mt-2h-120flex-gadm0/elec_s_120flex_ec_lcopt_Co2L-2H.nc"
+countries:
+    - AO
+    - BW
+    - CD
+    - LS
+    - MW
+    - MZ
+    - NA
+    - SZ
+    - TZ
+    - ZA
+    - ZM
+    - ZW
