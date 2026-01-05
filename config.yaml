@@ -1,3 +1,29 @@
+# -----------------------------------------------------------------------------
+# Configuration file for the DMAN-CEP application.
+#
+# Sections:
+#   config: Main configuration block.
+#     logging:
+#       file: Path to the log file for application logs.
+#       level: Logging level (e.g., DEBUG, INFO, WARNING).
+#     name: Name identifier for the current scenario or configuration.
+#     outline:
+#       countries: List of country codes included in the scenario.
+#       years: List of years to be simulated.
+#       representation_per_year: List of representations per year 
+#                                 (e.g., 'Y' for yearly, 
+#                                 'M1', 'M2', ... 'M12' for monthly
+#                                 'W1', 'W2', ... 'W52' for weekly).
+#       max_iterations: Maximum number of iterations for the solver.
+#       min_convergence_iterations: Minimum number of iterations required for convergence.
+#       delta_marginal_cost: Threshold for marginal cost difference to check convergence.
+#       marginal_cost_tolerance: Tolerance value for marginal cost calculations.
+#       expansion_enabled: Boolean flag to enable or disable network expansion. (Only False supported currently)
+#       cost_transmission_line: Cost assigned to transmission lines (set to 0 to ignore).
+#       marginal_cost_threshold_percentage: Percentage threshold for marginal cost (used for doubling).
+#     output_file_path: Path where the output solution file will be saved.
+#     inner_model_configuration: Placeholder for additional inner model (PyPSA-Earth) settings. Write it per country code.
+# -----------------------------------------------------------------------------
 config:
   logging:
     file: ./logs/app.log
@@ -20,8 +46,6 @@ config:
     years:
     - 2030
     representation_per_year: ['Y']
-    timeout_time_step: 180 # seconds
-    steps_rate_activity: 300
     max_iterations: 100
     min_convergence_iterations: 5
     delta_marginal_cost: 0.20
@@ -29,15 +53,6 @@ config:
     expansion_enabled: False
     cost_transmission_line: 0
     marginal_cost_threshold_percentage: 0.05 #It will double
-    domains: 
-      capacity: 
-          min: 0
-          max: 100000
-          step: 200
-      transmission: 
-          min: -20000
-          max: 20000
-          step: 200
   output_file_path: solutions/SAPP-yearly-emissions-nohydrogen-10flex-0.2-v3
   
   inner_model_configuration:
