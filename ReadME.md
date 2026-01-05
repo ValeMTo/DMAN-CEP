@@ -61,3 +61,4 @@ The framework models countries as autonomous agents that cooperate to minimize c
     python main.py
     ```
     - It will run with the configuration set in config.yaml file. 
+    - In `configs/` you can find the  `pypsa-earth` configurations.
